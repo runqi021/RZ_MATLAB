@@ -38,15 +38,37 @@ S.sessionList  = {};     % cell array of structs: .folder .dffFile
 S.sessionIdx   = 0;
 S.dFFout       = [];     % full dFFout struct (may contain spikes_oasis)
 
+% Video / sum-projection state
+S.tifInfo      = [];    % cached imfinfo result (so it's only called once per session)
+S.sumImg       = [];    % [H x W] mean projection over sampled frames
+S.vidRawFrames = [];    % [Hc x Wc x nF] raw double crops (for contrast sliders)
+S.vidBndMask   = [];    % [Hc x Wc] logical ROI boundary pixels
+S.vidVmin      = 0;     % contrast min for video (from slider)
+S.vidVmax      = 1;     % contrast max for video (from slider)
+S.vidTimer     = [];    % timer object for video playback
+S.vidFrIdx     = 1;     % current video frame index
+S.hVidImg      = [];    % handle to the image object in axVideo (for fast CData updates)
+S.nDropFrames  = 0;     % frames dropped in dFF, used to align TIF start
+S.dFFraw       = [];    % copy of dFF as loaded (before optional detrend)
+S.detrend      = false; % is detrend currently applied?
+S.hTraceCursor = [];    % blue vertical xline on axTrace (current video frame)
+S.hOasisLine   = [];    % orange overlay line for OASIS deconvolved trace
+
 % -- Factory defaults (restored by Reset button) --------------------------
 DEFAULTS.fps        = 30;
-DEFAULTS.method     = 'Threshold';
+DEFAULTS.method     = 'Raw dFF';
 DEFAULTS.threshold  = 2.0;
 DEFAULTS.minDist    = 0.5;
 DEFAULTS.minWidth   = 0.1;
 DEFAULTS.snapWin    = 0.20;
 DEFAULTS.diameter   = 30;
 DEFAULTS.zoomFactor = 4;
+DEFAULTS.prominence = 0;      % MinPeakProminence for findpeaks (0 = disabled)
+DEFAULTS.tauDecay   = 0.45;   % OASIS AR(1) decay constant (s)
+DEFAULTS.pythonExe  = '';      % filled at runtime by detectPyExe()
+
+% Auto-detect Python executable
+DEFAULTS.pythonExe = detectPyExe();
 
 %% -- Figure ---------------------------------------------------------------
 fig = uifigure('Name','Calcium Spike Sorter', ...
@@ -63,7 +85,7 @@ ctrlPan = uipanel(rootGL, 'Title','Controls', ...
     'FontSize',12,'FontWeight','bold');
 ctrlPan.Layout.Column = 1;
 
-nCtrlRows = 32;
+nCtrlRows = 37;
 cGL = uigridlayout(ctrlPan, [nCtrlRows 2]);
 cGL.RowHeight   = repmat({'fit'}, 1, nCtrlRows);
 cGL.ColumnWidth = {'fit','1x'};
@@ -137,13 +159,25 @@ r=r+1; h=uilabel(cGL,'Text','Zoom Factor:');
            'Limits',[1 20],'ValueChangedFcn',@(~,~) saveWorkingParams());
        efZoom.Layout.Row=r; efZoom.Layout.Column=2;
 
+r=r+1; h=uilabel(cGL,'Text','Python Exe:');
+       h.Layout.Row=r; h.Layout.Column=1;
+       efPythonExe = uieditfield(cGL,'text','Value',DEFAULTS.pythonExe, ...
+           'ValueChangedFcn',@(~,~) saveWorkingParams());
+       efPythonExe.Layout.Row=r; efPythonExe.Layout.Column=2;
+
+r=r+1; h=uilabel(cGL,'Text','Tau Decay (s):');
+       h.Layout.Row=r; h.Layout.Column=1;
+       efTauDecay = uieditfield(cGL,'numeric','Value',DEFAULTS.tauDecay, ...
+           'Limits',[0.01 10],'ValueChangedFcn',@(~,~) saveWorkingParams());
+       efTauDecay.Layout.Row=r; efTauDecay.Layout.Column=2;
+
 % -- Spike Detection -------------------------------------------------------
 r=r+1; h=uilabel(cGL,'Text','-- Spike Detection --','FontWeight','bold');
        h.Layout.Row=r; h.Layout.Column=[1 2];
 
-r=r+1; h=uilabel(cGL,'Text','Method:');
+r=r+1; h=uilabel(cGL,'Text','Detect on:');
        h.Layout.Row=r; h.Layout.Column=1;
-       ddMethod = uidropdown(cGL,'Items',{'Threshold','OASIS'},'Value','Threshold', ...
+       ddMethod = uidropdown(cGL,'Items',{'Raw dFF','OASIS deconv'},'Value','Raw dFF', ...
            'ValueChangedFcn',@(~,~) saveWorkingParams());
        ddMethod.Layout.Row=r; ddMethod.Layout.Column=2;
 
@@ -152,6 +186,12 @@ r=r+1; h=uilabel(cGL,'Text','Threshold (dF/F):');
        efThresh = uieditfield(cGL,'numeric','Value',DEFAULTS.threshold, ...
            'Limits',[-Inf Inf],'ValueChangedFcn',@(~,~) saveWorkingParams());
        efThresh.Layout.Row=r; efThresh.Layout.Column=2;
+
+r=r+1; h=uilabel(cGL,'Text','Min Prominence:');
+       h.Layout.Row=r; h.Layout.Column=1;
+       efProminence = uieditfield(cGL,'numeric','Value',DEFAULTS.prominence, ...
+           'Limits',[0 Inf],'ValueChangedFcn',@(~,~) saveWorkingParams());
+       efProminence.Layout.Row=r; efProminence.Layout.Column=2;
 
 r=r+1; h=uilabel(cGL,'Text','Min Distance (s):');
        h.Layout.Row=r; h.Layout.Column=1;
@@ -180,6 +220,16 @@ r=r+1; btnDetectAll = uibutton(cGL,'Text','Detect Spikes (All ROIs)', ...
            'ButtonPushedFcn',@cb_detectAll, ...
            'BackgroundColor',[0.10 0.50 0.22],'FontColor','white');
        btnDetectAll.Layout.Row=r; btnDetectAll.Layout.Column=[1 2];
+
+r=r+1; btnRunOasis = uibutton(cGL,'Text','Run OASIS Deconv (All ROIs)', ...
+           'ButtonPushedFcn',@cb_runOasis, ...
+           'BackgroundColor',[0.55 0.30 0.05],'FontColor','white');
+       btnRunOasis.Layout.Row=r; btnRunOasis.Layout.Column=[1 2];
+
+r=r+1; btnDetrend = uibutton(cGL,'Text','Detrend: OFF', ...
+           'ButtonPushedFcn',@cb_toggleDetrend, ...
+           'BackgroundColor',[0.25 0.25 0.55],'FontColor','white');
+       btnDetrend.Layout.Row=r; btnDetrend.Layout.Column=[1 2];
 
 % -- Manual Editing --------------------------------------------------------
 r=r+1; h=uilabel(cGL,'Text','-- Manual Editing --','FontWeight','bold');
@@ -240,25 +290,84 @@ if ispref('CalciumSpikeGUI','workingParams')
 end
 
 %% -- Right: plot panel ----------------------------------------------------
-rightGL = uigridlayout(rootGL, [3 1]);
+rightGL = uigridlayout(rootGL, [4 1]);
 rightGL.Layout.Column = 2;
-rightGL.RowHeight     = {'0.3x','0.4x','0.3x'};
+rightGL.RowHeight     = {'0.27x', 45, '0.40x', '0.27x'};
 rightGL.Padding       = [0 0 0 0];
 rightGL.RowSpacing    = 6;
 
-% Row 1: ROI video crop
-axCrop = uiaxes(rightGL);
-axCrop.Layout.Row            = 1;
-axCrop.Title.String          = 'ROI Crop';
-axCrop.Title.Interpreter     = 'none';
-axCrop.XLabel.String         = '';
-axCrop.YLabel.String         = '';
-colormap(axCrop, 'gray');
-axis(axCrop,'image');
+% Row 1: Nested 1x4 grid for Sum Projection + contrast + Video + contrast
+topGL = uigridlayout(rightGL, [1 4]);
+topGL.Layout.Row    = 1;
+topGL.ColumnWidth   = {'1x', 65, '1x', 65};
+topGL.Padding       = [0 0 0 0];
+topGL.ColumnSpacing = 4;
 
-% Row 2: dF/F trace with spikes
+axSum = uiaxes(topGL);
+axSum.Layout.Column          = 1;
+axSum.Title.String           = 'Avg Projection';
+axSum.Title.Interpreter      = 'none';
+axSum.XLabel.String          = '';
+axSum.YLabel.String          = '';
+colormap(axSum, 'gray');
+axis(axSum, 'image');
+
+% Sum contrast sliders (col 2)
+sumSldGL = uigridlayout(topGL, [4 1]);
+sumSldGL.Layout.Column = 2;
+sumSldGL.RowHeight = {'fit','1x','fit','1x'};
+sumSldGL.Padding = [2 4 2 4];
+
+uilabel(sumSldGL,'Text','Max','FontSize',8,'HorizontalAlignment','center');
+sldSumMax = uislider(sumSldGL, 'Value',1, 'Limits',[0 1], ...
+    'ValueChangedFcn', @(~,~) cb_sumContrastChanged());
+sldSumMax.Layout.Row = 2;
+
+uilabel(sumSldGL,'Text','Min','FontSize',8,'HorizontalAlignment','center');
+sldSumMin = uislider(sumSldGL, 'Value',0, 'Limits',[0 1], ...
+    'ValueChangedFcn', @(~,~) cb_sumContrastChanged());
+sldSumMin.Layout.Row = 4;
+
+axVideo = uiaxes(topGL);
+axVideo.Layout.Column        = 3;
+axVideo.Title.String         = 'Video';
+axVideo.Title.Interpreter    = 'none';
+axVideo.XLabel.String        = '';
+axVideo.YLabel.String        = '';
+colormap(axVideo, 'gray');
+axis(axVideo, 'image');
+
+% Video contrast sliders (col 4)
+vidSldGL = uigridlayout(topGL, [4 1]);
+vidSldGL.Layout.Column = 4;
+vidSldGL.RowHeight = {'fit','1x','fit','1x'};
+vidSldGL.Padding = [2 4 2 4];
+
+uilabel(vidSldGL,'Text','Max','FontSize',8,'HorizontalAlignment','center');
+sldVidMax = uislider(vidSldGL, 'Value',1, 'Limits',[0 1], ...
+    'ValueChangedFcn', @(~,~) cb_vidContrastChanged());
+sldVidMax.Layout.Row = 2;
+
+uilabel(vidSldGL,'Text','Min','FontSize',8,'HorizontalAlignment','center');
+sldVidMin = uislider(vidSldGL, 'Value',0, 'Limits',[0 1], ...
+    'ValueChangedFcn', @(~,~) cb_vidContrastChanged());
+sldVidMin.Layout.Row = 4;
+
+% Row 2: Time scrub slider
+scrubGL = uigridlayout(rightGL, [1 2]);
+scrubGL.Layout.Row = 2;
+scrubGL.ColumnWidth = {'fit', '1x'};
+scrubGL.Padding = [4 2 4 2];
+
+uilabel(scrubGL, 'Text','Time:', 'FontSize',9);
+sldTime = uislider(scrubGL, 'Value',1, 'Limits',[1 2], ...
+    'ValueChangedFcn', @cb_scrubTime, ...
+    'MajorTicksMode','auto', 'MinorTicksMode','auto');
+sldTime.Layout.Column = 2;
+
+% Row 3: dF/F trace with spikes
 axTrace = uiaxes(rightGL);
-axTrace.Layout.Row           = 2;
+axTrace.Layout.Row           = 3;
 axTrace.Title.String         = 'dF/F Trace  |  Left-click: add/delete spikes  |  N: navigate mode';
 axTrace.Title.Interpreter    = 'none';
 axTrace.XLabel.String        = 'Time (s)';
@@ -267,10 +376,10 @@ axTrace.YLabel.String        = 'dF/F';
 axTrace.YLabel.Interpreter   = 'none';
 hold(axTrace,'on'); grid(axTrace,'on'); box(axTrace,'on');
 
-% Row 3: placeholder for future raster
+% Row 4: placeholder for future raster
 lblFuture = uilabel(rightGL,'Text','[ Future: population raster ]', ...
     'HorizontalAlignment','center','FontSize',14,'FontColor',[0.5 0.5 0.5]);
-lblFuture.Layout.Row = 3;
+lblFuture.Layout.Row = 4;
 
 % Persistent overlay handles (updated in-place)
 hTraceLine = gobjects(0);   % dF/F trace line
@@ -279,6 +388,9 @@ hThreshLn  = gobjects(0);   % threshold horizontal line
 
 % Keyboard shortcut on figure
 fig.KeyPressFcn = @cb_key;
+
+% Close callback: stop video timer before destroying figure
+fig.CloseRequestFcn = @cb_close;
 
 %% =========================================================================
 %% CALLBACKS
@@ -328,6 +440,8 @@ fig.KeyPressFcn = @cb_key;
         S.hasTif     = ~isempty(sess.tifFile) && isfile(sess.tifFile);
         S.maskL      = [];
         S.meanImg    = [];
+        S.sumImg     = [];
+        S.tifInfo    = [];
         S.dFFout     = [];
 
         % Show current folder name
@@ -385,15 +499,48 @@ fig.KeyPressFcn = @cb_key;
             end
         end
 
-        % Load mean image from TIF (first frame as fallback for crop display)
+        % Extract nDropFrames from saved params (aligns TIF with dFF)
+        S.nDropFrames = 0;
+        if isfield(loaded,'dFFout') && isfield(loaded.dFFout,'params') ...
+                && isfield(loaded.dFFout.params,'nDropFrames')
+            S.nDropFrames = loaded.dFFout.params.nDropFrames;
+        end
+
+        % Load TIF: cache imfinfo, compute avg projection from sampled frames
+        S.tifInfo = [];
+        S.sumImg  = [];
+        S.meanImg = [];
         if S.hasTif
             try
-                tifInfo = imfinfo(S.tifFile);
-                S.meanImg = double(imread(S.tifFile, 1, 'Info', tifInfo));
+                S.tifInfo = imfinfo(S.tifFile);
+                nTotal   = numel(S.tifInfo);
+                startFr  = S.nDropFrames + 1;
+                if startFr > nTotal, startFr = 1; end
+                nAvail   = nTotal - startFr + 1;
+                nSamp    = min(50, nAvail);
+                sampIdxs = unique(round(linspace(startFr, nTotal, nSamp)));
+                fr1      = double(imread(S.tifFile, sampIdxs(1), 'Info', S.tifInfo));
+                acc      = zeros(size(fr1));
+                for ki = sampIdxs
+                    acc = acc + double(imread(S.tifFile, ki, 'Info', S.tifInfo));
+                end
+                S.sumImg  = acc / numel(sampIdxs);   % average projection
+                S.meanImg = S.sumImg;
             catch
-                S.hasTif = false;
+                S.hasTif  = false;
+                S.tifInfo = [];
             end
         end
+
+        % Store raw dFF and reset detrend
+        S.dFFraw  = S.dFF;
+        S.detrend = false;
+        btnDetrend.Text = 'Detrend: OFF';
+        btnDetrend.BackgroundColor = [0.25 0.25 0.55];
+
+        % Reset OASIS button appearance
+        btnRunOasis.Text            = 'Run OASIS Deconv (All ROIs)';
+        btnRunOasis.BackgroundColor = [0.55 0.30 0.05];
 
         % Initialize spike storage
         S.spikes = cell(N, 1);
@@ -418,14 +565,22 @@ fig.KeyPressFcn = @cb_key;
                 end
                 if isfield(saved,'spike_params')
                     sp = saved.spike_params;
-                    if isfield(sp,'fps'),       efFps.Value      = sp.fps;       end
-                    if isfield(sp,'threshold'),  efThresh.Value   = sp.threshold;  end
-                    if isfield(sp,'minDist'),     efMinDist.Value  = sp.minDist;    end
-                    if isfield(sp,'minWidth'),    efMinWidth.Value = sp.minWidth;   end
-                    if isfield(sp,'snapWin'),     efSnap.Value     = sp.snapWin;    end
-                    if isfield(sp,'method'),      ddMethod.Value   = sp.method;     end
-                    if isfield(sp,'diameter'),    efDiameter.Value = sp.diameter;   end
-                    if isfield(sp,'zoomFactor'),  efZoom.Value     = sp.zoomFactor; end
+                    if isfield(sp,'fps'),        efFps.Value       = sp.fps;        end
+                    if isfield(sp,'threshold'),   efThresh.Value    = sp.threshold;   end
+                    if isfield(sp,'minDist'),      efMinDist.Value   = sp.minDist;     end
+                    if isfield(sp,'minWidth'),     efMinWidth.Value  = sp.minWidth;    end
+                    if isfield(sp,'snapWin'),      efSnap.Value      = sp.snapWin;     end
+                    if isfield(sp,'method')
+                        mval = sp.method;
+                        if strcmp(mval,'Threshold'), mval = 'Raw dFF'; end
+                        if strcmp(mval,'OASIS'),     mval = 'OASIS deconv'; end
+                        if ismember(mval, ddMethod.Items), ddMethod.Value = mval; end
+                    end
+                    if isfield(sp,'diameter'),     efDiameter.Value  = sp.diameter;    end
+                    if isfield(sp,'zoomFactor'),   efZoom.Value      = sp.zoomFactor;  end
+                    if isfield(sp,'prominence'),   efProminence.Value = sp.prominence; end
+                    if isfield(sp,'tauDecay'),     efTauDecay.Value  = sp.tauDecay;    end
+                    if isfield(sp,'pythonExe'),    efPythonExe.Value = sp.pythonExe;   end
                 end
                 lblCurrentFolder.Text = [folderName '  (saved)'];
             catch
@@ -494,43 +649,88 @@ fig.KeyPressFcn = @cb_key;
 
     % -- Core spike detection for one ROI ----------------------------------
     function detectSpikesForROI(roiIdx)
-        trace = S.dFF(:, roiIdx);
-        method = ddMethod.Value;
+        fps     = efFps.Value;
+        thr     = efThresh.Value;
+        minDist = efMinDist.Value;
+        minW    = efMinWidth.Value;
+        prom    = efProminence.Value;
+        detOn   = ddMethod.Value;   % 'Raw dFF' or 'OASIS deconv'
 
-        switch method
-            case 'Threshold'
-                thr      = efThresh.Value;
-                minDistS = efMinDist.Value;
-                minWS    = efMinWidth.Value;
-                fps      = efFps.Value;
-                spk = find_spikes_threshold(trace, fps, thr, minDistS, minWS);
-
-            case 'OASIS'
-                % Try loading pre-computed spikes from dFFout
-                spk = [];
-                if ~isempty(S.dFFout) && isfield(S.dFFout,'spikes_oasis') ...
-                        && ~isempty(S.dFFout.spikes_oasis)
-                    oasisSpk = S.dFFout.spikes_oasis(:, roiIdx);
-                    thr = efThresh.Value;
-                    % Threshold the OASIS spike train
-                    candidates = find(oasisSpk > thr);
-                    if ~isempty(candidates)
-                        % Apply min distance: keep only local maxima
-                        minDistFr = max(1, round(efMinDist.Value * efFps.Value));
-                        spk = enforce_min_distance(oasisSpk, candidates, minDistFr);
-                    end
+        switch detOn
+            case 'OASIS deconv'
+                if ~isempty(S.dFFout) && isfield(S.dFFout,'dFF_oasis_deconv') ...
+                        && ~isempty(S.dFFout.dFF_oasis_deconv) ...
+                        && size(S.dFFout.dFF_oasis_deconv,2) >= roiIdx
+                    trace_det = S.dFFout.dFF_oasis_deconv(:, roiIdx);
+                elseif ~isempty(S.dFFout) && isfield(S.dFFout,'spikes_oasis') ...
+                        && ~isempty(S.dFFout.spikes_oasis) ...
+                        && size(S.dFFout.spikes_oasis,2) >= roiIdx
+                    trace_det = S.dFFout.spikes_oasis(:, roiIdx);
+                else
+                    uialert(fig, ...
+                        'No OASIS data found. Press "Run OASIS Deconv" first.', ...
+                        'OASIS Not Run');
+                    return;
                 end
-                if isempty(spk)
-                    % Fallback: run threshold on dF/F trace
-                    thr      = efThresh.Value;
-                    minDistS = efMinDist.Value;
-                    minWS    = efMinWidth.Value;
-                    fps      = efFps.Value;
-                    spk = find_spikes_threshold(trace, fps, thr, minDistS, minWS);
-                end
+            otherwise   % 'Raw dFF'
+                trace_det = S.dFF(:, roiIdx);
         end
 
+        spk = find_spikes_threshold(trace_det, fps, thr, minDist, minW, prom);
         S.spikes{roiIdx} = spk(:);
+    end
+
+    % -- Run OASIS deconvolution on all ROIs -------------------------------
+    function cb_runOasis(~,~)
+        if isempty(S.dFF) || S.nROI == 0
+            uialert(fig,'Load data first.','No Data'); return;
+        end
+        if isempty(S.dFFout) || ~isfield(S.dFFout,'F_dff') || isempty(S.dFFout.F_dff)
+            uialert(fig, ...
+                ['No raw fluorescence (F_dff) found in the loaded dFF file.\n' ...
+                 'Re-run dFF_RZ with UseOASIS=false to ensure F_dff is saved.'], ...
+                'F_dff Missing');
+            return;
+        end
+
+        pyExe = efPythonExe.Value;
+        if isempty(pyExe), pyExe = detectPyExe(); end
+        if isempty(pyExe) || ~isfile(pyExe)
+            uialert(fig, ...
+                'Python executable not found. Set it in the Parameters section.', ...
+                'Python Not Found');
+            return;
+        end
+
+        fps      = efFps.Value;
+        tauDecay = efTauDecay.Value;
+        g = round(exp(-(1/fps)/tauDecay), 2);
+
+        btnRunOasis.Text   = 'Running OASIS...';
+        btnRunOasis.Enable = 'off';
+        drawnow;
+        try
+            [F_oasis, dFF_oasis, spikes_oasis, baseline_oasis] = ...
+                helper.oasis_deconv_and_dff_AR1(S.dFFout.F_dff, g, 'PythonExe', pyExe);
+
+            S.dFFout.F_oasis_deconv   = F_oasis;
+            S.dFFout.dFF_oasis_deconv = dFF_oasis;
+            S.dFFout.spikes_oasis     = spikes_oasis;
+            S.dFFout.baseline_oasis   = baseline_oasis;
+            S.dFFout.g_AR1            = g;
+
+            btnRunOasis.Text            = 'OASIS: Done';
+            btnRunOasis.BackgroundColor = [0.10 0.60 0.45];
+            btnRunOasis.Enable          = 'on';
+            drawnow;
+
+            refreshTrace();   % show orange overlay
+        catch ME
+            btnRunOasis.Text            = 'Run OASIS Deconv (All ROIs)';
+            btnRunOasis.BackgroundColor = [0.55 0.30 0.05];
+            btnRunOasis.Enable          = 'on';
+            uialert(fig, sprintf('OASIS failed:\n%s', ME.message), 'OASIS Error');
+        end
     end
 
     % -- Axes click: add or delete spike -----------------------------------
@@ -665,15 +865,37 @@ fig.KeyPressFcn = @cb_key;
             'Done','Icon','success');
     end
 
+    % -- Detrend toggle callback -------------------------------------------
+    function cb_toggleDetrend(~,~)
+        if isempty(S.dFF) || isempty(S.dFFraw), return; end
+        S.detrend = ~S.detrend;
+        if S.detrend
+            S.dFF = detrend(S.dFFraw);
+            btnDetrend.Text = 'Detrend: ON';
+            btnDetrend.BackgroundColor = [0.10 0.60 0.45];
+        else
+            S.dFF = S.dFFraw;
+            btnDetrend.Text = 'Detrend: OFF';
+            btnDetrend.BackgroundColor = [0.25 0.25 0.55];
+        end
+        refreshTrace();
+    end
+
     function applyWorkingParams(p)
         efFps.Value      = p.fps;
-        ddMethod.Value   = p.method;
+        mval = p.method;
+        if strcmp(mval,'Threshold'), mval = 'Raw dFF'; end
+        if strcmp(mval,'OASIS'),     mval = 'OASIS deconv'; end
+        if ismember(mval, ddMethod.Items), ddMethod.Value = mval; end
         efThresh.Value   = p.threshold;
         efMinDist.Value  = p.minDist;
         efMinWidth.Value = p.minWidth;
         efSnap.Value     = p.snapWin;
         efDiameter.Value = p.diameter;
         efZoom.Value     = p.zoomFactor;
+        if isfield(p,'prominence'),  efProminence.Value = p.prominence;  end
+        if isfield(p,'tauDecay'),    efTauDecay.Value   = p.tauDecay;    end
+        if isfield(p,'pythonExe'),   efPythonExe.Value  = p.pythonExe;   end
     end
 
     function saveWorkingParams()
@@ -685,6 +907,9 @@ fig.KeyPressFcn = @cb_key;
         wp.snapWin    = efSnap.Value;
         wp.diameter   = efDiameter.Value;
         wp.zoomFactor = efZoom.Value;
+        wp.prominence = efProminence.Value;
+        wp.tauDecay   = efTauDecay.Value;
+        wp.pythonExe  = efPythonExe.Value;
         setpref('CalciumSpikeGUI','workingParams',wp);
     end
 
@@ -699,7 +924,7 @@ fig.KeyPressFcn = @cb_key;
 
         % Build roi_spikes struct array
         roi_spikes = struct('spike_idx',{},'spike_t',{},'spike_amp',{}, ...
-                            'spike_train',{},'n_spikes',{});
+                            'spike_train',{},'n_spikes',{},'ifSpike',{});
         for ii = 1:S.nROI
             spk = S.spikes{ii};
             rs = struct();
@@ -719,8 +944,12 @@ fig.KeyPressFcn = @cb_key;
                 rs.spike_train = train;
                 rs.n_spikes    = numel(spk);
             end
+            rs.ifSpike = rs.n_spikes > 0;   % flag: skip in future analysis if false
             roi_spikes(ii) = rs; %#ok<AGROW>
         end
+
+        % Convenience logical vector: ifSpike(ii) = true if ROI ii has any spikes
+        ifSpike = logical([roi_spikes.n_spikes] > 0);
 
         % Build spike_params struct
         spike_params = struct();
@@ -732,12 +961,22 @@ fig.KeyPressFcn = @cb_key;
         spike_params.fps        = fps;
         spike_params.diameter   = efDiameter.Value;
         spike_params.zoomFactor = efZoom.Value;
+        spike_params.prominence = efProminence.Value;
+        spike_params.tauDecay   = efTauDecay.Value;
         spike_params.dff_file   = S.dffFile;
         spike_params.saved_at   = datestr(now); %#ok<TNOW1,DATST>
+        spike_params.oasis_run     = ~isempty(S.dFFout) && isfield(S.dFFout,'spikes_oasis') ...
+                                      && ~isempty(S.dFFout.spikes_oasis);
+        spike_params.oasis_tauDecay = efTauDecay.Value;
+        spike_params.oasis_g        = '';
+        if ~isempty(S.dFFout) && isfield(S.dFFout,'g_AR1')
+            spike_params.oasis_g = S.dFFout.g_AR1;
+        end
+        spike_params.detect_on = ddMethod.Value;
 
         % Save per-session file
         outFile = fullfile(S.folderPath, 'ca_spike_data.mat');
-        save(outFile, 'roi_spikes', 'spike_params', '-v7.3');
+        save(outFile, 'roi_spikes', 'spike_params', 'ifSpike', '-v7.3');
 
         % Update master file
         updateMasterFile(roi_spikes, spike_params);
@@ -746,8 +985,14 @@ fig.KeyPressFcn = @cb_key;
         lblCurrentFolder.Text = [folderName '  (saved)'];
         updateNavDisplay();
 
-        uialert(fig, sprintf('Saved %d ROIs to:\n%s', S.nROI, outFile), ...
-            'Saved','Icon','success');
+        % Save composite video for the current ROI
+        vidFile = saveROIVideo();
+        fullVidFile = saveFullFrameVideo();
+
+        msg = sprintf('Saved %d ROIs to:\n%s', S.nROI, outFile);
+        if ~isempty(vidFile),     msg = [msg sprintf('\n\nCrop video:\n%s',      vidFile)];     end
+        if ~isempty(fullVidFile), msg = [msg sprintf('\n\nFull-frame video:\n%s', fullVidFile)]; end
+        uialert(fig, msg, 'Saved','Icon','success');
     end
 
     function updateMasterFile(roi_spikes, spike_params)
@@ -761,37 +1006,46 @@ fig.KeyPressFcn = @cb_key;
         entry.roi_spikes   = roi_spikes;
         entry.spike_params = spike_params;
 
+        % Load or initialise master struct
+        master = struct();
+        master.sessions = [];   % plain [] avoids the 0x0 struct bug
+
         if isfile(masterFile)
             try
                 loaded = load(masterFile, 'master');
-                master = loaded.master;
+                if isstruct(loaded.master) && isfield(loaded.master, 'sessions')
+                    master = loaded.master;
+                end
             catch
-                master = struct('sessions',{});
+                % keep fresh master on corruption
             end
-        else
-            master = struct('sessions',{});
         end
 
-        % Find existing entry for this folder, or append
+        % Upsert: find existing entry for this folder or append
+        nSess = numel(master.sessions);
         found = false;
-        if isfield(master,'sessions') && ~isempty(master.sessions)
-            for ii = 1:numel(master.sessions)
-                if strcmp(master.sessions(ii).folder, S.folderPath)
-                    master.sessions(ii) = entry;
-                    found = true;
-                    break;
-                end
+        for ii = 1:nSess
+            if strcmp(master.sessions(ii).folder, S.folderPath)
+                master.sessions(ii) = entry;
+                found = true;
+                break;
             end
         end
         if ~found
-            if isempty(master.sessions)
-                master.sessions = entry;
+            if nSess == 0
+                master.sessions = entry;           % first session
             else
-                master.sessions(end+1) = entry;
+                master.sessions(end+1) = entry;    % append
             end
         end
 
         save(masterFile, 'master', '-v7.3');
+    end
+
+    % -- Figure close: stop timer before deleting figure -------------------
+    function cb_close(~,~)
+        stopVideoTimer();
+        delete(fig);
     end
 
 %% =========================================================================
@@ -804,7 +1058,19 @@ fig.KeyPressFcn = @cb_key;
     end
 
     function refreshCrop()
-        cla(axCrop);
+        % Stop any running video playback
+        stopVideoTimer();
+
+        % Clear video state and cursor
+        S.vidRawFrames = [];
+        S.vidBndMask   = [];
+        S.hVidImg      = [];
+        S.hTraceCursor = [];
+        S.vidFrIdx     = 1;
+
+        cla(axSum);
+        cla(axVideo);
+
         if S.nROI == 0, return; end
 
         [~, sessName] = fileparts(S.folderPath);
@@ -814,9 +1080,11 @@ fig.KeyPressFcn = @cb_key;
         lblROI.Text = sprintf('ROI: %d / %d', roiIdx, S.nROI);
 
         if ~S.hasMask || isempty(S.maskL)
-            axCrop.Title.String = sprintf('ROI %d  --  %s  (no mask)', ...
+            axSum.Title.String = sprintf('ROI %d  --  %s  (no mask)', ...
                 roiIdx, strrep(sessName,'_',' '));
-            axCrop.Title.Interpreter = 'none';
+            axSum.Title.Interpreter = 'none';
+            axVideo.Title.String = 'Video';
+            axVideo.Title.Interpreter = 'none';
             return;
         end
 
@@ -824,26 +1092,32 @@ fig.KeyPressFcn = @cb_key;
         labels = unique(S.maskL(:));
         labels(labels == 0) = [];
         if roiIdx > numel(labels)
-            axCrop.Title.String = sprintf('ROI %d  --  %s  (out of range)', ...
+            axSum.Title.String = sprintf('ROI %d  --  %s  (out of range)', ...
                 roiIdx, strrep(sessName,'_',' '));
-            axCrop.Title.Interpreter = 'none';
+            axSum.Title.Interpreter = 'none';
+            axVideo.Title.String = 'Video';
+            axVideo.Title.Interpreter = 'none';
             return;
         end
 
         roiMask = (S.maskL == labels(roiIdx));
         props = regionprops(roiMask, 'Centroid');
         if isempty(props)
-            axCrop.Title.String = sprintf('ROI %d  --  %s  (empty mask)', ...
+            axSum.Title.String = sprintf('ROI %d  --  %s  (empty mask)', ...
                 roiIdx, strrep(sessName,'_',' '));
-            axCrop.Title.Interpreter = 'none';
+            axSum.Title.Interpreter = 'none';
+            axVideo.Title.String = 'Video';
+            axVideo.Title.Interpreter = 'none';
             return;
         end
 
         cx = round(props(1).Centroid(1));
         cy = round(props(1).Centroid(2));
 
-        % Choose image source: mean projection if available, else mask
-        if S.hasTif && ~isempty(S.meanImg)
+        % Choose image source for avg projection
+        if ~isempty(S.sumImg)
+            baseImg = S.sumImg;
+        elseif ~isempty(S.meanImg)
             baseImg = S.meanImg;
         else
             baseImg = double(S.maskL > 0) * 100;
@@ -859,23 +1133,232 @@ fig.KeyPressFcn = @cb_key;
         cropImg  = baseImg(r1:r2, c1:c2);
         cropMask = roiMask(r1:r2, c1:c2);
 
-        imagesc(axCrop, cropImg);
-        colormap(axCrop, 'gray');
-        axis(axCrop, 'image');
-        hold(axCrop, 'on');
-
-        % Overlay ROI contour in red
+        % Compute boundary mask (logical) for the crop region
+        bndMask = false(size(cropMask));
         if any(cropMask(:))
             bnd = bwboundaries(cropMask);
             for b = 1:numel(bnd)
-                plot(axCrop, bnd{b}(:,2), bnd{b}(:,1), 'r-', 'LineWidth', 1.5);
+                for bp = 1:size(bnd{b},1)
+                    br = bnd{b}(bp,1);
+                    bc = bnd{b}(bp,2);
+                    if br >= 1 && br <= size(bndMask,1) && bc >= 1 && bc <= size(bndMask,2)
+                        bndMask(br, bc) = true;
+                    end
+                end
             end
         end
 
-        hold(axCrop, 'off');
-        axCrop.Title.String = sprintf('ROI %d  --  %s', ...
-            roiIdx, strrep(sessName,'_',' '));
-        axCrop.Title.Interpreter = 'none';
+        % === Left panel: Avg Projection ===
+        imagesc(axSum, cropImg);
+        colormap(axSum, 'gray');
+        axis(axSum, 'image');
+        hold(axSum, 'on');
+        if any(bndMask(:))
+            bnd = bwboundaries(cropMask);
+            for b = 1:numel(bnd)
+                plot(axSum, bnd{b}(:,2), bnd{b}(:,1), 'r-', 'LineWidth', 1.5);
+            end
+        end
+        hold(axSum, 'off');
+        axSum.Title.String = sprintf('Avg Proj  |  ROI %d', roiIdx);
+        axSum.Title.Interpreter = 'none';
+
+        % === Right panel: Video ===
+        if S.hasTif && ~isempty(S.tifInfo)
+            axVideo.Title.String = 'Video (loading...)';
+            axVideo.Title.Interpreter = 'none';
+            drawnow;
+
+            startFr = S.nDropFrames + 1;
+            nTotal  = numel(S.tifInfo);
+            if startFr > nTotal, startFr = 1; end
+            nAvail  = nTotal - startFr + 1;
+            nVid    = min(500, nAvail);
+            vidIdxs = startFr - 1 + round(linspace(1, nAvail, nVid));
+            nVid    = numel(vidIdxs);
+
+            % Load raw grayscale crops
+            cropH = r2 - r1 + 1;
+            cropW = c2 - c1 + 1;
+            rawFrames = zeros(cropH, cropW, nVid, 'double');
+            for ki = 1:nVid
+                try
+                    fr = double(imread(S.tifFile, vidIdxs(ki), 'Info', S.tifInfo));
+                    rawFrames(:,:,ki) = fr(r1:r2, c1:c2);
+                catch
+                    % If frame read fails, leave as zeros
+                end
+            end
+
+            % Compute normalization range (1st-99th percentile of first 10 frames)
+            calibData = rawFrames(:,:,1:min(10,nVid));
+            vmin = prctile(calibData(:), 1);
+            vmax = prctile(calibData(:), 99);
+            if vmax <= vmin, vmax = vmin + 1; end
+
+            % Store raw frames and boundary mask for contrast sliders
+            S.vidRawFrames = rawFrames;
+            S.vidBndMask   = bndMask;
+            S.vidVmin      = vmin;
+            S.vidVmax      = vmax;
+
+            % Set slider ranges and values
+            globalMin = min(rawFrames(:));
+            globalMax = max(rawFrames(:));
+            if globalMax == globalMin, globalMax = globalMin + 1; end
+
+            % Sum sliders
+            sldSumMin.Limits = [globalMin globalMax];
+            sldSumMax.Limits = [globalMin globalMax];
+            sumVmin = prctile(cropImg(:), 1);
+            sumVmax = prctile(cropImg(:), 99);
+            if sumVmax <= sumVmin, sumVmax = sumVmin + 1; end
+            sldSumMin.Value = max(globalMin, min(globalMax - eps, sumVmin));
+            sldSumMax.Value = min(globalMax, max(globalMin + eps, sumVmax));
+
+            % Video sliders
+            sldVidMin.Limits = [globalMin globalMax];
+            sldVidMax.Limits = [globalMin globalMax];
+            sldVidMin.Value = max(globalMin, min(globalMax - eps, vmin));
+            sldVidMax.Value = min(globalMax, max(globalMin + eps, vmax));
+
+            % Apply clim to axSum
+            clim(axSum, [sldSumMin.Value, sldSumMax.Value]);
+
+            % Display first frame as RGB with boundary overlay
+            S.hVidImg = image(axVideo, applyContrast(rawFrames(:,:,1), vmin, vmax, bndMask));
+            axis(axVideo, 'image');
+
+            % Set scrub slider range
+            sldTime.Limits = [1 max(2, nVid)];
+            sldTime.Value  = 1;
+            S.vidFrIdx     = 1;
+
+            axVideo.Title.String = sprintf('Video  |  ROI %d  (%d frames)', roiIdx, nVid);
+            axVideo.Title.Interpreter = 'none';
+
+            % Start playback timer
+            startVideoTimer();
+        else
+            axVideo.Title.String = 'Video (no TIF)';
+            axVideo.Title.Interpreter = 'none';
+        end
+    end
+
+    % -- Contrast helper: raw frame -> uint8 RGB with red boundary ---------
+    function rgb = applyContrast(rawFrame, vmin, vmax, bndMask)
+        fr8 = uint8(min(255, max(0, (rawFrame - vmin) / (vmax - vmin) * 255)));
+        R = fr8; G = fr8; B = fr8;
+        R(bndMask) = 255; G(bndMask) = 0; B(bndMask) = 0;
+        rgb = cat(3, R, G, B);
+    end
+
+    % -- Contrast slider callbacks -----------------------------------------
+    function cb_sumContrastChanged()
+        lo = sldSumMin.Value;  hi = sldSumMax.Value;
+        if lo >= hi
+            % clamp: keep a small gap
+            if lo >= sldSumMax.Limits(2) - eps
+                lo = sldSumMax.Limits(2) - (sldSumMax.Limits(2) - sldSumMax.Limits(1))*0.01;
+            end
+            hi = max(lo + eps, hi);
+        end
+        if isgraphics(axSum)
+            clim(axSum, [lo hi]);
+        end
+    end
+
+    function cb_vidContrastChanged()
+        lo = sldVidMin.Value;  hi = sldVidMax.Value;
+        if lo >= hi
+            hi = max(lo + eps, hi);
+        end
+        S.vidVmin = lo;  S.vidVmax = hi;
+        % Immediately re-render current frame
+        if ~isempty(S.vidRawFrames) && S.vidFrIdx >= 1 && S.vidFrIdx <= size(S.vidRawFrames,3)
+            fr = S.vidRawFrames(:,:,S.vidFrIdx);
+            if isgraphics(S.hVidImg)
+                S.hVidImg.CData = applyContrast(fr, lo, hi, S.vidBndMask);
+            end
+        end
+    end
+
+    % -- Time scrub slider callback ----------------------------------------
+    function cb_scrubTime(~,~)
+        if isempty(S.vidRawFrames), return; end
+        nF = size(S.vidRawFrames, 3);
+        newIdx = max(1, min(nF, round(sldTime.Value)));
+        S.vidFrIdx = newIdx;
+        fr = S.vidRawFrames(:,:,newIdx);
+        if isgraphics(S.hVidImg)
+            S.hVidImg.CData = applyContrast(fr, S.vidVmin, S.vidVmax, S.vidBndMask);
+        end
+        updateTraceCursor();
+        drawnow limitrate;
+    end
+
+    % -- Video playback helpers --------------------------------------------
+    function startVideoTimer()
+        stopVideoTimer();
+        if isempty(S.vidRawFrames) || size(S.vidRawFrames,3) < 2, return; end
+        period = 1 / min(efFps.Value, 15);
+        S.vidTimer = timer('ExecutionMode','fixedRate', ...
+                           'Period', max(0.04, period), ...
+                           'TimerFcn', @(~,~) stepVideoFrame());
+        start(S.vidTimer);
+    end
+
+    function stopVideoTimer()
+        if ~isempty(S.vidTimer) && isvalid(S.vidTimer)
+            stop(S.vidTimer);
+            delete(S.vidTimer);
+        end
+        S.vidTimer = [];
+    end
+
+    function stepVideoFrame()
+        if isempty(S.vidRawFrames) || ~isgraphics(S.hVidImg), return; end
+        nF = size(S.vidRawFrames, 3);
+        S.vidFrIdx = mod(S.vidFrIdx, nF) + 1;
+
+        % Update video display with current contrast
+        fr = S.vidRawFrames(:,:,S.vidFrIdx);
+        S.hVidImg.CData = applyContrast(fr, S.vidVmin, S.vidVmax, S.vidBndMask);
+
+        % Update scrub slider position
+        if isgraphics(sldTime) && sldTime.Limits(2) >= S.vidFrIdx
+            sldTime.Value = S.vidFrIdx;
+        end
+
+        % Update blue trace cursor
+        updateTraceCursor();
+        drawnow limitrate;
+    end
+
+    % -- Blue cursor on axTrace showing current video frame time -----------
+    function updateTraceCursor()
+        if isempty(S.vidRawFrames) || isempty(S.t_img), return; end
+        if ~isgraphics(axTrace), return; end
+
+        % vidIdxs maps video frame ki -> TIF frame number -> t_img index
+        nFrames  = numel(S.tifInfo);
+        nAvail   = nFrames - S.nDropFrames;
+        nVid     = size(S.vidRawFrames, 3);
+        vidIdxs  = round(linspace(1, nAvail, nVid));   % indices into dFF (1-based)
+
+        fi = min(S.vidFrIdx, numel(vidIdxs));
+        dffIdx = vidIdxs(fi);
+        dffIdx = max(1, min(length(S.t_img), dffIdx));
+        t_cur  = S.t_img(dffIdx);
+
+        if isgraphics(S.hTraceCursor)
+            S.hTraceCursor.Value = t_cur;
+        elseif isgraphics(axTrace)
+            hold(axTrace, 'on');
+            S.hTraceCursor = xline(axTrace, t_cur, 'b-', 'LineWidth', 1.5, ...
+                'Label','frame', 'LabelHorizontalAlignment','right');
+            S.hTraceCursor.HitTest = 'off';
+        end
     end
 
     function refreshTrace()
@@ -891,6 +1374,17 @@ fig.KeyPressFcn = @cb_key;
         % Plot dF/F trace
         hTraceLine = plot(axTrace, S.t_img, trace, 'Color',[0 0 0], 'LineWidth',0.9);
         hTraceLine.HitTest = 'off';
+
+        % OASIS deconvolved overlay (orange) -- shown if data is available
+        S.hOasisLine = gobjects(0);
+        if ~isempty(S.dFFout) && isfield(S.dFFout,'dFF_oasis_deconv') ...
+                && ~isempty(S.dFFout.dFF_oasis_deconv) ...
+                && size(S.dFFout.dFF_oasis_deconv,2) >= roiIdx ...
+                && length(S.dFFout.dFF_oasis_deconv(:,roiIdx)) == length(S.t_img)
+            S.hOasisLine = plot(axTrace, S.t_img, S.dFFout.dFF_oasis_deconv(:,roiIdx), ...
+                'Color',[1.0 0.55 0.10], 'LineWidth', 0.8);
+            S.hOasisLine.HitTest = 'off';
+        end
 
         % Threshold dashed line
         hThreshLn = yline(axTrace, efThresh.Value, '--', ...
@@ -912,6 +1406,10 @@ fig.KeyPressFcn = @cb_key;
 
         redraw_spikes();
         updateSpikeCount();
+
+        % Reset and re-create trace cursor
+        S.hTraceCursor = [];
+        updateTraceCursor();
     end
 
     function redraw_spikes()
@@ -947,70 +1445,245 @@ fig.KeyPressFcn = @cb_key;
         lblCount.Text = sprintf('Spikes: %d', numel(curSpk));
     end
 
+    % -- Save composite video for current ROI (crop video + trace w/ time cursor) --
+    function vidFile = saveROIVideo()
+        vidFile = '';
+        if isempty(S.vidRawFrames) || isempty(S.dFF) || S.nROI == 0, return; end
+
+        roiIdx  = S.curROI;
+        nVid    = size(S.vidRawFrames, 3);
+        nFrames = numel(S.tifInfo);
+        nAvail  = nFrames - S.nDropFrames;
+        vidIdxs = round(linspace(1, nAvail, nVid));
+
+        trace = S.dFF(:, roiIdx);
+        t     = S.t_img;
+        spk   = S.spikes{roiIdx};
+
+        % Panel dimensions
+        panelH = 400;
+        traceW = 800;
+
+        % Scale crop to panelH (preserve aspect, force even width)
+        cropH_src = size(S.vidRawFrames, 1);
+        cropW_src = size(S.vidRawFrames, 2);
+        sf    = panelH / cropH_src;
+        cropH = panelH;
+        cropW = max(2, 2 * round(cropW_src * sf / 2));
+
+        outFile = fullfile(S.folderPath, sprintf('roi%d_ca_video.mp4', roiIdx));
+        vw  = [];
+        hFig = [];
+        try
+            vw = VideoWriter(outFile, 'MPEG-4'); %#ok<TNMLP>
+            vw.FrameRate = min(efFps.Value, 15);
+            open(vw);
+
+            % Build trace figure (hidden) -- rendered once, time cursor updated per frame
+            hFig = figure('Visible','off', 'Color','white', ...
+                          'Units','pixels', 'Position',[0 0 traceW panelH], ...
+                          'MenuBar','none', 'ToolBar','none');
+            ax = axes(hFig, 'Units','normalized', 'Position',[0.10 0.15 0.86 0.76]);
+            plot(ax, t, trace, 'Color',[0 0 0], 'LineWidth', 0.9);
+            hold(ax, 'on');
+
+            % Static spike markers
+            if ~isempty(spk)
+                valid = spk(spk >= 1 & spk <= length(trace));
+                if ~isempty(valid)
+                    scatter(ax, t(valid), trace(valid), 40, 'v', 'filled', ...
+                        'MarkerFaceColor',[1.00 0.28 0.28], 'MarkerEdgeColor','none');
+                end
+            end
+
+            yLims = ylim(ax);
+            % Time cursor as a two-point vertical line
+            hXL = plot(ax, [t(1) t(1)], yLims, 'r-', 'LineWidth', 2);
+            xlim(ax, [t(1) t(end)]);  ylim(ax, yLims);
+            xlabel(ax, 'Time (s)', 'FontSize', 9);
+            ylabel(ax, 'dF/F',     'FontSize', 9);
+            grid(ax, 'on');  box(ax, 'on');
+            title(ax, sprintf('ROI %d', roiIdx), 'FontSize', 10, 'Interpreter','none');
+            drawnow;
+
+            for ki = 1:nVid
+                % Left panel: render crop frame with current contrast settings
+                cropRGB    = applyContrast(S.vidRawFrames(:,:,ki), ...
+                    S.vidVmin, S.vidVmax, S.vidBndMask);
+                cropScaled = imresize(cropRGB, [cropH cropW]);
+
+                % Right panel: advance time cursor and capture trace
+                dffIdx = min(vidIdxs(ki), length(t));
+                t_cur = t(dffIdx);
+                set(hXL, 'XData', [t_cur t_cur]);
+                drawnow limitrate;
+                fr = getframe(hFig);
+                traceImg = fr.cdata;
+                if size(traceImg,1) ~= panelH || size(traceImg,2) ~= traceW
+                    traceImg = imresize(traceImg, [panelH traceW]);
+                end
+
+                writeVideo(vw, [cropScaled, traceImg]);
+            end
+
+            close(vw);   vw   = [];
+            close(hFig); hFig = [];
+            vidFile = outFile;
+        catch ME
+            if ~isempty(vw)  && isopen(vw),  close(vw);  end
+            if ~isempty(hFig) && isgraphics(hFig), close(hFig); end
+            warning('saveROIVideo: %s', ME.message);
+        end
+    end
+
+    % -- Save full-frame video for current ROI -----------------------------
+    function vidFile = saveFullFrameVideo()
+        vidFile = '';
+        if ~S.hasTif || isempty(S.tifInfo) || isempty(S.dFF) || S.nROI == 0, return; end
+        if ~S.hasMask || isempty(S.maskL), return; end
+
+        roiIdx = S.curROI;
+
+        % ROI full-frame mask + boundary
+        labels = unique(S.maskL(:)); labels(labels == 0) = [];
+        if roiIdx > numel(labels), return; end
+        roiMask  = (S.maskL == labels(roiIdx));
+        bndSegs  = bwboundaries(roiMask);
+        [H, W]   = size(roiMask);
+
+        % Same frame sampling used by the GUI video
+        nFrames  = numel(S.tifInfo);
+        nAvail   = max(1, nFrames - S.nDropFrames);
+        nVid     = min(500, nAvail);
+        startFr  = S.nDropFrames + 1;
+        vidIdxs  = startFr - 1 + round(linspace(1, nAvail, nVid));
+        nVid     = numel(vidIdxs);
+
+        trace = S.dFF(:, roiIdx);
+        t     = S.t_img;
+        spk   = S.spikes{roiIdx};
+
+        % Panel sizes (scale full frame to max 512 px height)
+        panelH = min(H, 512);
+        panelW = max(2, 2*round(W * panelH / H / 2));   % keep aspect, even width
+        traceW = 800;
+
+        % Normalization from avg projection
+        if ~isempty(S.sumImg)
+            vmin = double(prctile(S.sumImg(:), 1));
+            vmax = double(prctile(S.sumImg(:), 99));
+        elseif ~isempty(S.meanImg)
+            vmin = double(prctile(S.meanImg(:), 1));
+            vmax = double(prctile(S.meanImg(:), 99));
+        else
+            vmin = 0; vmax = 1000;
+        end
+        if vmax <= vmin, vmax = vmin + 1; end
+
+        outFile = fullfile(S.folderPath, sprintf('roi%d_fullframe_video.mp4', roiIdx));
+        vw   = [];
+        hFig2 = [];
+        try
+            vw = VideoWriter(outFile, 'MPEG-4'); %#ok<TNMLP>
+            vw.FrameRate = min(efFps.Value, 15);
+            open(vw);
+
+            % Build hidden trace figure
+            hFig2 = figure('Visible','off','Color','white','Units','pixels', ...
+                           'Position',[0 0 traceW panelH],'MenuBar','none','ToolBar','none');
+            ax2 = axes(hFig2,'Units','normalized','Position',[0.10 0.15 0.86 0.76]);
+            plot(ax2, t, trace,'Color',[0 0 0],'LineWidth',0.9);
+            hold(ax2,'on');
+            if ~isempty(spk)
+                valid = spk(spk >= 1 & spk <= length(trace));
+                if ~isempty(valid)
+                    scatter(ax2, t(valid), trace(valid), 40, 'v', 'filled', ...
+                        'MarkerFaceColor',[1 0.28 0.28],'MarkerEdgeColor','none');
+                end
+            end
+            yLims = ylim(ax2);
+            hXL   = plot(ax2,[t(1) t(1)], yLims,'r-','LineWidth',2);
+            xlim(ax2,[t(1) t(end)]); ylim(ax2, yLims);
+            xlabel(ax2,'Time (s)','FontSize',9);
+            ylabel(ax2,'dF/F','FontSize',9);
+            grid(ax2,'on'); box(ax2,'on');
+            title(ax2, sprintf('ROI %d  (full frame)', roiIdx),'FontSize',10,'Interpreter','none');
+            drawnow;
+
+            for ki = 1:nVid
+                % Load full frame from TIF
+                try
+                    fr = double(imread(S.tifFile, vidIdxs(ki), 'Info', S.tifInfo));
+                catch
+                    fr = zeros(H, W);
+                end
+
+                % Normalise -> uint8 RGB
+                fr8 = uint8(min(255, max(0, (fr - vmin)/(vmax - vmin)*255)));
+                R = fr8; G = fr8; B = fr8;
+
+                % Draw ROI boundary red on full frame
+                for b = 1:numel(bndSegs)
+                    pts = bndSegs{b};
+                    for pi = 1:size(pts,1)
+                        rr = pts(pi,1); cc = pts(pi,2);
+                        if rr>=1&&rr<=H&&cc>=1&&cc<=W
+                            R(rr,cc)=255; G(rr,cc)=0; B(rr,cc)=0;
+                        end
+                    end
+                end
+                fullRGB    = imresize(cat(3,R,G,B), [panelH panelW]);
+
+                % Update red time cursor
+                dffIdx = max(1, min(length(t), vidIdxs(ki) - S.nDropFrames));
+                set(hXL,'XData',[t(dffIdx) t(dffIdx)]);
+                drawnow limitrate;
+                fr2      = getframe(hFig2);
+                traceImg = fr2.cdata;
+                if size(traceImg,1) ~= panelH || size(traceImg,2) ~= traceW
+                    traceImg = imresize(traceImg, [panelH traceW]);
+                end
+
+                writeVideo(vw, [fullRGB, traceImg]);
+            end
+
+            close(vw);    vw    = [];
+            close(hFig2); hFig2 = [];
+            vidFile = outFile;
+        catch ME
+            if ~isempty(vw)    && isopen(vw),       close(vw);    end
+            if ~isempty(hFig2) && isgraphics(hFig2), close(hFig2); end
+            warning('saveFullFrameVideo: %s', ME.message);
+        end
+    end
+
 end  % calcium_spike_gui
 
 
 %% =========================================================================
-%% LOCAL HELPER -- threshold-based spike finder
+%% LOCAL HELPER -- findpeaks-based spike finder
 %% =========================================================================
-function locs = find_spikes_threshold(trace, fps, threshold, minDistS, minWS)
-%FIND_SPIKES_THRESHOLD  Detect calcium spikes by threshold crossing + local max.
-%
-%   1. Find contiguous above-threshold regions.
-%   2. Within each region, take the local maximum as the spike location.
-%   3. Filter by minimum distance between spikes.
-%   4. Filter by minimum width of the above-threshold region.
+function locs = find_spikes_threshold(trace, fps, threshold, minDistS, minWS, minProm)
+%FIND_SPIKES_THRESHOLD  Detect calcium spikes using MATLAB findpeaks.
+%   Uses MinPeakHeight, MinPeakDistance, MinPeakWidth, MinPeakProminence.
 
 trace = trace(:);
-T     = length(trace);
 locs  = [];
+if length(trace) < 3, return; end
 
-if T < 3, return; end
-
-% -- 1. Find above-threshold crossings ------------------------------------
-above = trace > threshold;
-if ~any(above), return; end
-
-% Find contiguous regions
-d_above    = diff([0; above; 0]);
-region_on  = find(d_above == 1);
-region_off = find(d_above == -1) - 1;  % last index in region
-
-nRegions = numel(region_on);
-if nRegions == 0, return; end
-
-% -- 2. Min width filter ---------------------------------------------------
-minWFr = max(1, round(minWS * fps));
-keep   = (region_off - region_on + 1) >= minWFr;
-region_on  = region_on(keep);
-region_off = region_off(keep);
-
-if isempty(region_on), return; end
-
-% -- 3. Local max within each region --------------------------------------
-nReg = numel(region_on);
-locs = zeros(nReg, 1);
-for i = 1:nReg
-    seg = trace(region_on(i):region_off(i));
-    [~, imax] = max(seg);
-    locs(i) = region_on(i) + imax - 1;
-end
-
-% -- 4. Min distance: greedily keep highest, remove neighbours -------------
 minDistFr = max(1, round(minDistS * fps));
-if minDistFr > 1 && numel(locs) > 1
-    [~, ord]  = sort(trace(locs), 'descend');
-    sorted    = locs(ord);
-    keepFlag  = true(length(sorted), 1);
-    for i = 1:length(sorted)
-        if ~keepFlag(i), continue; end
-        tooClose = abs(sorted - sorted(i)) < minDistFr;
-        tooClose(i) = false;
-        keepFlag(tooClose) = false;
-    end
-    locs = sort(sorted(keepFlag));
+minWFr    = max(0, round(minWS * fps));
+
+pkArgs = {'MinPeakHeight',    threshold, ...
+          'MinPeakDistance',  minDistFr};
+if minWFr > 0
+    pkArgs = [pkArgs, {'MinPeakWidth', minWFr}];
+end
+if minProm > 0
+    pkArgs = [pkArgs, {'MinPeakProminence', minProm}];
 end
 
+[~, locs] = findpeaks(trace, pkArgs{:});
 locs = locs(:);
 end  % find_spikes_threshold
 
@@ -1088,3 +1761,19 @@ for i = 1:numel(uFolders)
                              'tifFile', tifFile); %#ok<AGROW>
 end
 end  % scanForDFFSessions
+
+
+%% =========================================================================
+%% LOCAL HELPER -- detect Python executable for cellpose-gpu environment
+%% =========================================================================
+function pyExe = detectPyExe()
+%DETECTPYEXE  Find cellpose-gpu Python executable under USERPROFILE.
+    candidates = { ...
+        fullfile(getenv('USERPROFILE'), '.conda',     'envs','cellpose-gpu','python.exe'), ...
+        fullfile(getenv('USERPROFILE'), 'anaconda3',  'envs','cellpose-gpu','python.exe'), ...
+        fullfile(getenv('USERPROFILE'), 'miniconda3', 'envs','cellpose-gpu','python.exe') };
+    pyExe = '';
+    for i = 1:numel(candidates)
+        if isfile(candidates{i}), pyExe = candidates{i}; return; end
+    end
+end
