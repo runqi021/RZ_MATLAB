@@ -1,7 +1,7 @@
 %%
 close all; clear; clc;
 
-folderPath = "D:\RUNQI\260224_vglut2_soma_g8s\phys\processed\breathing\pFN_roi3_z20_512x512_3x_2000f_00001";
+folderPath = "D:\RUNQI\260224_vglut2_soma_g8s\phys\processed\breathing\pFN_roi4_z0_512x512_5x_2000f_00001";
 
 % Auto-find DLC CSV and SAM output
 csv_hits = dir(fullfile(folderPath, '*snapshot_best-20.csv'));
@@ -133,17 +133,18 @@ params_spec.fpass  = [0.1 15];
 params_spec.err    = [2 0.05];
 
 [Sk_raw, fk_raw] = mtspectrumc(breath, params_spec);
-figure('Color','White');
+figure('Color','none');
 plot(fk_raw, Sk_raw,                'k',  'LineWidth', 1.2);
 xlabel('Frequency (Hz)');
 ylabel('Power');
 xlim([0 10]);
 grid('on');
 axis square;
+set(gca,'Color','none');
 
 % Save breathing spectrum
-outFig = fullfile(folderPath, 'breathing_spectrum_raw.png');
-exportgraphics(gcf, outFig, 'ContentType','vector');
+outFig = fullfile(folderPath, 'breathing_spectrum_raw.pdf');
+exportgraphics(gcf, outFig, 'ContentType','vector', 'BackgroundColor','none');
 fprintf('Saved breathing spectrum:\n  %s\n', outFig);
 %% ------------------- FIGURE 1: BREATH + STACKED dFF (Top 10 ROIs) --------
 T_img = numel(breath);
@@ -162,7 +163,7 @@ end
 yt  = 0:gap:gap*(N_roi-1);                    % positions (bottom -> top)
 ytl = roi_ids(end:-1:1);                      % labels (bottom = lowest ROI)
 
-figure('Position',[200 200 900 700]);
+figure('Position',[200 200 900 700], 'Color','none');
 tiledlayout(3,1,'TileSpacing','compact','Padding','compact');
 
 % ---- TOP PANEL: breathing + breathing events (Sb) ----
@@ -224,9 +225,10 @@ text(ax2, x0+0.5, dFF_scale + 0.05*dFF_scale, ...
     'FontSize', 10);
 hold(ax2,'off');
 
-% Save breathing spectrum
-outFig = fullfile(folderPath, 'breath_N_dFF.png');
-exportgraphics(gcf, outFig, 'ContentType','vector');
+% Save breathing + dFF
+set(findall(gcf,'Type','axes'),'Color','none');
+outFig = fullfile(folderPath, 'breath_N_dFF.pdf');
+exportgraphics(gcf, outFig, 'ContentType','vector', 'BackgroundColor','none');
 fprintf('Saved breathing and dFF traces:\n  %s\n', outFig);
 
 % ---- Figure 1b: middle 10 s zoom ----
@@ -238,7 +240,7 @@ mid_end   = min(mid_end,   T_img);
 
 t_mid = t_img(mid_start:mid_end);
 
-figure('Position',[200 200 900 700]);
+figure('Position',[200 200 900 700], 'Color','none');
 tiledlayout(3,1,'TileSpacing','compact','Padding','compact');
 
 ax1b = nexttile(1);
@@ -283,8 +285,9 @@ text(ax2b, t_mid(end)+0.1, dFF_scale + 0.05*dFF_scale, ...
 
 hold(ax2b,'off');
 
-outFig = fullfile(folderPath, 'breath_N_dFF_mid10s.png');
-exportgraphics(gcf, outFig, 'ContentType','vector');
+set(findall(gcf,'Type','axes'),'Color','none');
+outFig = fullfile(folderPath, 'breath_N_dFF_mid10s.pdf');
+exportgraphics(gcf, outFig, 'ContentType','vector', 'BackgroundColor','none');
 fprintf('Saved middle 10 s zoom:\n  %s\n', outFig);
 
 %% Figure 2: Plot breath and detected calcium spk
@@ -301,7 +304,7 @@ end
 yt_spk  = fliplr(1.5*gap*(nSpkROI - (1:nSpkROI)));
 ytl_spk = arrayfun(@(id) sprintf('ROI#%02d', id), roiSpk_id(end:-1:1), 'UniformOutput', false);
 
-figure('Position',[200 200 900 700]);
+figure('Position',[200 200 900 700], 'Color','none');
 tiledlayout(3,1,'TileSpacing','compact','Padding','compact');
 ax1 = nexttile(1);
 plot(ax1, t_img, -breath, 'Color', 'k', 'LineWidth',1.2); xlim([0 30]);
@@ -333,11 +336,12 @@ yticklabels(ax2, ytl_spk);
 ylabel(ax2, 'ROI#');
 xlabel('Time (s)')
 
-outFig = fullfile(folderPath, 'breath_ca_spk_30s.png');
-exportgraphics(gcf, outFig, 'ContentType','vector');
+set(findall(gcf,'Type','axes'),'Color','none');
+outFig = fullfile(folderPath, 'breath_ca_spk_30s.pdf');
+exportgraphics(gcf, outFig, 'ContentType','vector', 'BackgroundColor','none');
 fprintf('Saved breath+ca spk (30s):\n  %s\n', outFig);
 
-figure('Position',[200 200 900 700]);
+figure('Position',[200 200 900 700], 'Color','none');
 tiledlayout(3,1,'TileSpacing','compact','Padding','compact');
 ax1 = nexttile(1);
 plot(ax1, t_img, -breath, 'Color', 'k', 'LineWidth',1.2); xlim([0 T_img/fs]);
@@ -369,8 +373,9 @@ yticklabels(ax2, ytl_spk);
 ylabel(ax2, 'ROI#');
 xlabel('Time (s)')
 
-outFig = fullfile(folderPath, 'breath_ca_spk_full.png');
-exportgraphics(gcf, outFig, 'ContentType','vector');
+set(findall(gcf,'Type','axes'),'Color','none');
+outFig = fullfile(folderPath, 'breath_ca_spk_full.pdf');
+exportgraphics(gcf, outFig, 'ContentType','vector', 'BackgroundColor','none');
 fprintf('Saved breath+ca spk (full):\n  %s\n', outFig);
 
 %% ---- Figure 3. Inspiration-triggered dFF ----
@@ -400,7 +405,7 @@ end
 
 % ---------- Per-ROI event-triggered overlays (all trials + mean, RAW dFF) ----------
 
-figure('Name', (sprintf('Event-triggered dFF (n=%d breaths)', nEv)));
+figure('Name', (sprintf('Event-triggered dFF (n=%d breaths)', nEv)), 'Color','none');
 
 for i = 1:N_roi
     seg = dff_evt_seg_all{i};    % nEv x (2*win+1)
@@ -432,8 +437,9 @@ for i = 1:N_roi
 
 end
 
-outFig = fullfile(folderPath, 'triggered_avg.png');
-exportgraphics(gcf, outFig, 'ContentType','vector');
+set(findall(gcf,'Type','axes'),'Color','none');
+outFig = fullfile(folderPath, 'triggered_avg.pdf');
+exportgraphics(gcf, outFig, 'ContentType','vector', 'BackgroundColor','none');
 fprintf('Saved triggered average:\n  %s\n', outFig);
 
 %% ---- Figure 4. Per-ROI calcium-triggered breathing overlays ----
@@ -463,7 +469,7 @@ for k = 1:nSpkROI
     breath_avg = mean(seg_ca, 1);
 
     % --- Figure ---
-    fig4 = figure('Color','w', 'Name', sprintf('ROI#%02d triggered avg', roi_id), ...
+    fig4 = figure('Color','none', 'Name', sprintf('ROI#%02d triggered avg', roi_id), ...
                   'Position', [100 100 900 400]);
 
     % LEFT subplot: breath-triggered dFF
@@ -495,11 +501,12 @@ for k = 1:nSpkROI
     hold off;
 
     % Save
-    outPng = fullfile(folderPath, sprintf('ROI%02d_triggered_avg.png', roi_id));
-    exportgraphics(fig4, outPng, 'ContentType','vector');
+    set(findall(fig4,'Type','axes'),'Color','none');
+    outPdf = fullfile(folderPath, sprintf('ROI%02d_triggered_avg.pdf', roi_id));
+    exportgraphics(fig4, outPdf, 'ContentType','vector', 'BackgroundColor','none');
     outFigFile = fullfile(folderPath, sprintf('ROI%02d_triggered_avg.fig', roi_id));
     savefig(fig4, outFigFile);
-    fprintf('Saved triggered avg for ROI#%02d:\n  %s\n  %s\n', roi_id, outPng, outFigFile);
+    fprintf('Saved triggered avg for ROI#%02d:\n  %s\n  %s\n', roi_id, outPdf, outFigFile);
 end
 
 %% ---- Figure 5: dt_last analysis (raster + histogram + permutation) ----
@@ -582,7 +589,7 @@ for k = 1:nSpkROI
     obs_color = double(p_val < 0.05) * sig_color + double(p_val >= 0.05) * ns_color;
 
     % ---- Figure: 1x3 layout ----
-    fig5 = figure('Color', 'w', ...
+    fig5 = figure('Color', 'none', ...
         'Name', sprintf('dt_last: ROI#%02d', roi_id), ...
         'Position', [0 0 1100 400]);
 
@@ -662,11 +669,12 @@ for k = 1:nSpkROI
     hold(ax_scan, 'off');
 
     % ---- Save figure ----
+    set(findall(fig5,'Type','axes'),'Color','none');
     outFig_fig = fullfile(folderPath, sprintf('calcium_breath_dtlast_ROI%02d.fig', roi_id));
     savefig(fig5, outFig_fig);
-    outFig_png = fullfile(folderPath, sprintf('calcium_breath_dtlast_ROI%02d.png', roi_id));
-    exportgraphics(fig5, outFig_png, 'ContentType', 'vector');
-    fprintf('Saved dt_last figure for ROI#%02d:\n  %s\n  %s\n', roi_id, outFig_fig, outFig_png);
+    outFig_pdf = fullfile(folderPath, sprintf('calcium_breath_dtlast_ROI%02d.pdf', roi_id));
+    exportgraphics(fig5, outFig_pdf, 'ContentType', 'vector', 'BackgroundColor','none');
+    fprintf('Saved dt_last figure for ROI#%02d:\n  %s\n  %s\n', roi_id, outFig_fig, outFig_pdf);
 
     % ---- Store per-ROI results ----
     dtlast_results(k).roi_id    = roi_id;
@@ -714,7 +722,7 @@ for k = 1:nSpkROI
 
     ca_phi = phi(spk_frames);
 
-    figure('Color','white');
+    figure('Color','none');
     histogram(ca_phi, 40, 'Normalization','percentage');
     xlim([-pi pi]);
     ylim([0 25]);
@@ -723,10 +731,111 @@ for k = 1:nSpkROI
     ylabel('% events');
     title(sprintf('ROI#%02d  phase preference (n=%d)', roi_id, numel(ca_phi)));
 
-    outFig = fullfile(folderPath, sprintf('phase_hist_ROI%02d.png', roi_id));
-    exportgraphics(gcf, outFig, 'ContentType','vector');
+    set(findall(gcf,'Type','axes'),'Color','none');
+    outFig = fullfile(folderPath, sprintf('phase_hist_ROI%02d.pdf', roi_id));
+    exportgraphics(gcf, outFig, 'ContentType','vector', 'BackgroundColor','none');
     fprintf('Saved phase histogram for ROI#%02d:\n  %s\n', roi_id, outFig);
 end
+
+%% ---- Figure 7: Average projection with ROI mask overlay ----
+avg_hits = dir(fullfile(folderPath, '*_minusDark_MC_AVG_for_CP.tif'));
+avgImg   = double(imread(fullfile(folderPath, avg_hits(1).name)));
+
+% Clip at 1%/99% percentile and normalise to [0 1]
+lo = prctile(avgImg(:), 1);
+hi = prctile(avgImg(:), 99);
+avgImg = (avgImg - lo) / (hi - lo);
+avgImg(avgImg < 0) = 0;
+avgImg(avgImg > 1) = 1;
+
+% Grayscale -> RGB
+avgRGB = repmat(avgImg, [1 1 3]);
+
+% Burn yellow ROI outlines into the image
+maskL    = SAMload.maskL;
+outlines = bwperim(maskL > 0);
+yellow   = [1 1 0];
+for ch = 1:3
+    plane = avgRGB(:,:,ch);
+    plane(outlines) = yellow(ch);
+    avgRGB(:,:,ch) = plane;
+end
+
+% Display at native resolution (1 pixel = 1 pixel)
+[imgH, imgW, ~] = size(avgRGB);
+dpi = 150;
+fig7 = figure('Color','none', ...
+    'Units','inches', 'Position',[1 1 imgW/dpi imgH/dpi]);
+ax7 = axes(fig7, 'Units','normalized', 'Position',[0 0 1 1], 'Color','none');
+imshow(avgRGB, 'Parent', ax7, 'Border','tight');
+hold(ax7, 'on');
+
+% Label only spiking ROIs — placed outside ROI, no overlap, with leader line
+offset_px  = 35;                             % how far from centroid
+dirs       = [0 -1; 1 -1; 1 0; 1 1;         % N NE E SE
+              0  1;-1  1;-1 0;-1 -1];        % S SW W NW
+dirs       = dirs ./ vecnorm(dirs, 2, 2);    % unit vectors
+txt_hw     = [20 12];                        % approx label half-size [w h] in px
+placed_boxes = zeros(0, 4);                  % [x1 y1 x2 y2] of placed labels
+
+for k = 1:nSpkROI
+    roi_id = roiSpk_id(k);
+    [r, c] = find(maskL == roi_id);
+    if isempty(r), continue; end
+    cy = mean(r);  cx = mean(c);
+
+    % direction from image centre → ROI (prefer outward)
+    outward = [cx - imgW/2, cy - imgH/2];
+    outward = outward / (norm(outward) + eps);
+
+    best_pos   = [cx, cy];
+    best_score = -Inf;
+
+    for d = 1:size(dirs, 1)
+        tx = cx + offset_px * dirs(d, 1);
+        ty = cy + offset_px * dirs(d, 2);
+
+        % stay inside image
+        if tx < 1 || tx > imgW || ty < 1 || ty > imgH, continue; end
+
+        % candidate bounding box
+        bx = [tx - txt_hw(1)/2, ty - txt_hw(2)/2, ...
+              tx + txt_hw(1)/2, ty + txt_hw(2)/2];
+
+        % penalty: overlap with already-placed labels
+        ov = 0;
+        for p = 1:size(placed_boxes, 1)
+            pb = placed_boxes(p, :);
+            if bx(1)<pb(3) && bx(3)>pb(1) && bx(2)<pb(4) && bx(4)>pb(2)
+                ov = ov + 1;
+            end
+        end
+
+        % penalty: sitting on top of any ROI
+        txi = round(max(1, min(imgW, tx)));
+        tyi = round(max(1, min(imgH, ty)));
+        on_roi = maskL(tyi, txi) > 0;
+
+        score = -ov*100 - on_roi*50 + dot(dirs(d,:), outward)*10;
+        if score > best_score
+            best_score = score;
+            best_pos   = [tx, ty];
+        end
+    end
+
+    text(ax7, best_pos(1), best_pos(2), sprintf('%d', roi_id), ...
+        'Color','y', 'FontSize', 8, 'FontWeight','bold', ...
+        'HorizontalAlignment','center', 'VerticalAlignment','middle');
+
+    placed_boxes(end+1, :) = [best_pos(1)-txt_hw(1)/2, best_pos(2)-txt_hw(2)/2, ...
+                              best_pos(1)+txt_hw(1)/2, best_pos(2)+txt_hw(2)/2]; %#ok<AGROW>
+end
+hold(ax7, 'off');
+
+outFig = fullfile(folderPath, 'avg_projection_ROImask.pdf');
+exportgraphics(fig7, outFig, 'ContentType','vector', ...
+    'BackgroundColor','none', 'Resolution', 300);
+fprintf('Saved avg projection with ROI mask:\n  %s\n', outFig);
 
 %% ---- Save master file ----
 outMat_master = fullfile(folderPath, 'breath_master_working.mat');
