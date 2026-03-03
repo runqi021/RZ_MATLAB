@@ -1,7 +1,7 @@
 %%
 close all; clear; clc;
 
-folderPath = "D:\RUNQI\260224_vglut2_soma_g8s\phys\processed\breathing\pFN_roi4_z0_512x512_5x_6000f_00001";
+folderPath = "D:\RUNQI\260224_vglut2_soma_g8s\phys\processed\breathing\pFN_roi3_z20_512x512_3x_2000f_00001";
 
 % Auto-find DLC CSV and SAM output
 csv_hits = dir(fullfile(folderPath, '*snapshot_best-20.csv'));
@@ -17,19 +17,10 @@ SAM     = fullfile(folderPath, sam_hits(1).name);
 fprintf('DLC CSV : %s\n', csv_hits(1).name);
 fprintf('SAM     : %s\n', sam_hits(1).name);
 
-%% load breath peak
-breath_peak = load(fullfile(folderPath, 'breath_peak_data.mat'));
-
-insp_onsets = breath_peak.insp_onset_idx;
-Sb = breath_peak.insp_onsets_train;
-
-insp_onsets(insp_onsets<30)=[];
-Sb(1:30)=[];
-
 %% Load F
 SAMload = load(SAM);
 F_raw = SAMload.F;
-% toss first second (system steady state）
+% toss first second (system steady state)
 F = F_raw;
 F(1:30, :) = [];
 
@@ -47,6 +38,32 @@ nDrop = 30;      % for breathing video
 
 t_img = (0:T-1)' / fps_img;
 roi_ids = arrayfun(@(k) sprintf('%02d', k), 1:N_roi, 'UniformOutput', false);
+
+%% load calcium spike
+in = load(fullfile(folderPath, 'ca_spike_data.mat'));
+ifSpk = in.ifSpike; roiSpk_id = find(ifSpk == 1);
+ca_spk_data = in.roi_spikes;
+
+nSpkROI = numel(roiSpk_id);
+
+ca_spk_train = zeros(T, nSpkROI, 'double');
+ca_spk_id = {}; t_spk = {};
+
+for k = 1:nSpkROI
+    i = roiSpk_id(k);
+    ca_spk_train(:, k) = ca_spk_data(i).spike_train;
+    ca_spk_id{k} = ca_spk_data(i).spike_idx;
+    t_spk{k} = ca_spk_data(i).spike_t;
+end
+
+%% load breath peak
+breath_peak = load(fullfile(folderPath, 'breath_peak_data.mat'));
+
+insp_onsets = breath_peak.insp_onset_idx;
+Sb = breath_peak.insp_onsets_train;
+
+insp_onsets(insp_onsets<30)=[];
+Sb(1:30)=[];
 
 %% ------------------- DLC BREATHING INPUT --------------------
 % DLC CSV has 3 header lines: scorer / bodyparts / coords
@@ -90,7 +107,7 @@ for d = 1:nActiveDots
         sig = fillmissing(sig, 'linear', 'EndValues', 'nearest');
     end
     traces(:,d) = sig;
-    fprintf('  %s → %s\n', fp.dot_selection{d}, fp.coord_types{di});
+    fprintf('  %s -> %s\n', fp.dot_selection{d}, fp.coord_types{di});
 end
 
 switch fp.combine_method
@@ -106,203 +123,6 @@ breath = (breath - mean(breath)) / std(breath);
 fprintf('Breathing trace: %d samples after dropping first %d frames\n', ...
         numel(breath), nDrop);
 
-% %% ---- Breathing event detection: fine-tune parameters ----
-%
-% % =========================================================
-% % USER-EDITABLE PEAK DETECTION PARAMETERS
-% % =========================================================
-% minProm_factor = 1.5;      % Prominence = factor × std(breath).
-%                             %   Increase → fewer peaks.  Decrease → more peaks.
-% minDist_sec    = 0.3;      % Min seconds between consecutive peaks.
-% minHeight      = -Inf;     % Min absolute peak height (z-score). -Inf = disabled.
-% minWidth_sec   = 0;        % Min peak width in seconds. 0 = disabled.
-% snap_win_sec   = 0.2;     % Manual-add snaps to nearest local max within this window (s).
-% preFrames      = 0;        % Shift all detected peaks earlier by this many frames.
-% % =========================================================
-%
-% fs    = fps_img;
-% T_img = numel(breath);
-%
-% peak     = breath;
-% minProm  = minProm_factor * std(peak);
-% minDist  = round(minDist_sec * fs);
-% minWidth = round(minWidth_sec * fs);
-% snap_win = round(snap_win_sec * fs);
-%
-% % Build findpeaks argument list dynamically
-% fp_args = {'MinPeakProminence', minProm, 'MinPeakDistance', minDist};
-% if isfinite(minHeight)
-%     fp_args = [fp_args, {'MinPeakHeight', minHeight}];
-% end
-% if minWidth > 0
-%     fp_args = [fp_args, {'MinPeakWidth', minWidth}];
-% end
-%
-% [insp_amp, insp_onsets] = findpeaks(peak, fp_args{:});
-%
-% % Frame shift
-% insp_onsets = insp_onsets - preFrames;
-% insp_onsets(insp_onsets < 1) = 1;
-%
-% fprintf('Auto-detected %d inspiration-onset events.\n', numel(insp_onsets));
-%
-% % Freeze auto result (used for saving and audit trail)
-% insp_onsets_auto = sort(insp_onsets(:));
-%
-% %% ---- Initial auto-detection QC plot ----
-%
-% figure('Name', 'Breathing event detection (auto)', 'Position', [200 200 1000 400]);
-% plot(t_img, breath, 'k'); hold on;
-% plot(t_img(insp_onsets_auto), breath(insp_onsets_auto), 'ro', 'MarkerFaceColor', 'r');
-% xline(t_img(insp_onsets_auto), 'r:');
-% xlabel('Time (s)'); ylabel('Breath (z)');
-% title(sprintf('Auto-detected peaks: n=%d  |  minProm=%.2f  minDist=%.2f s', ...
-%     numel(insp_onsets_auto), minProm, minDist_sec));
-% grid on; hold off;
-%
-% %% ---- Interactive peak editor ----
-% % Left-click  = add a peak (snaps to nearest local max within snap_win_sec)
-% % Right-click = delete nearest existing peak
-% % Press Enter = finish editing
-%
-% insp_onsets_added   = [];            % frame indices manually added
-% insp_onsets_deleted = [];            % frame indices removed (from auto set)
-% insp_onsets_edit    = insp_onsets_auto;   % working copy
-%
-% fig_edit = figure('Name', 'Peak Editor | Left-click=Add  Right-click=Delete  Enter=Done', ...
-%     'Position', [100 80 1100 480]);
-% ax_edit = axes('Parent', fig_edit);
-%
-% fprintf('\n=== INTERACTIVE PEAK EDITOR ===\n');
-% fprintf('  Left-click  : add peak (snaps to local max within %.2f s)\n', snap_win_sec);
-% fprintf('  Right-click : delete nearest existing peak\n');
-% fprintf('  Press Enter : finish editing\n\n');
-%
-% while ishandle(fig_edit)
-%     % Refresh plot
-%     cla(ax_edit);
-%     plot(ax_edit, t_img, breath, 'k', 'LineWidth', 1);
-%     hold(ax_edit, 'on');
-%     if ~isempty(insp_onsets_edit)
-%         plot(ax_edit, t_img(insp_onsets_edit), breath(insp_onsets_edit), ...
-%             'ro', 'MarkerFaceColor', 'r', 'MarkerSize', 6);
-%     end
-%     xlabel(ax_edit, 'Time (s)'); ylabel(ax_edit, 'Breath (z)');
-%     title(ax_edit, sprintf('Peak Editor  |  n=%d  (+%d / -%d from auto)  |  L=Add  R=Delete  Enter=Done', ...
-%         numel(insp_onsets_edit), numel(insp_onsets_added), numel(insp_onsets_deleted)));
-%     grid(ax_edit, 'on'); hold(ax_edit, 'off');
-%     drawnow;
-%
-%     % Wait for user click
-%     try
-%         [x_click, ~, button] = ginput(1);
-%     catch
-%         break;
-%     end
-%     if isempty(x_click) || ~ishandle(fig_edit)
-%         break;   % Enter pressed → done
-%     end
-%
-%     % Convert clicked x (time in s) → nearest frame index
-%     [~, fc] = min(abs(t_img - x_click));
-%
-%     if button == 1   % Left-click: add peak
-%         lo = max(1, fc - snap_win);
-%         hi = min(numel(breath), fc + snap_win);
-%         [~, rel_idx] = max(breath(lo:hi));
-%         new_frame = lo + rel_idx - 1;
-%         if ~ismember(new_frame, insp_onsets_edit)
-%             insp_onsets_edit = sort([insp_onsets_edit(:); new_frame]);
-%             insp_onsets_added(end+1) = new_frame;
-%             insp_onsets_deleted(insp_onsets_deleted == new_frame) = [];
-%             fprintf('Added   frame %5d  (t = %.2f s)\n', new_frame, t_img(new_frame));
-%         else
-%             fprintf('Peak at frame %d already exists — skipped.\n', new_frame);
-%         end
-%
-%     elseif button == 3   % Right-click: delete nearest
-%         if ~isempty(insp_onsets_edit)
-%             [~, ni] = min(abs(t_img(insp_onsets_edit) - x_click));
-%             del_frame = insp_onsets_edit(ni);
-%             insp_onsets_edit(ni) = [];
-%             if ismember(del_frame, insp_onsets_auto)
-%                 insp_onsets_deleted(end+1) = del_frame;
-%             end
-%             insp_onsets_added(insp_onsets_added == del_frame) = [];
-%             fprintf('Deleted frame %5d  (t = %.2f s)\n', del_frame, t_img(del_frame));
-%         end
-%     end
-% end
-%
-% % Finalise
-% insp_onsets_final   = sort(insp_onsets_edit(:));
-% insp_onsets_added   = sort(insp_onsets_added(:));
-% insp_onsets_deleted = sort(insp_onsets_deleted(:));
-%
-% fprintf('\nEditing complete: %d final peaks  (+%d added, -%d deleted from %d auto)\n', ...
-%     numel(insp_onsets_final), numel(insp_onsets_added), ...
-%     numel(insp_onsets_deleted), numel(insp_onsets_auto));
-%
-% % Overwrite insp_onsets so all downstream code is unaffected
-% insp_onsets = insp_onsets_final;
-% t_insp      = t_img(insp_onsets);
-%
-% % Recompute binary event train from final peaks
-% Sb = zeros(T_img, 1);
-% Sb(insp_onsets) = 1;
-%
-% %% ---- Save: final peak detection figure + .mat ----
-%
-% fig_qc_final = figure('Name', 'Breathing peak detection (final)', ...
-%     'Position', [200 200 1000 400]);
-% plot(t_img, breath, 'k', 'LineWidth', 1); hold on;
-% if ~isempty(insp_onsets_auto)
-%     plot(t_img(insp_onsets_auto), breath(insp_onsets_auto), ...
-%         'o', 'Color', [0.65 0.65 0.65], 'MarkerFaceColor', [0.65 0.65 0.65], ...
-%         'MarkerSize', 4, 'DisplayName', 'Auto peaks');
-% end
-% if ~isempty(insp_onsets_added)
-%     plot(t_img(insp_onsets_added), breath(insp_onsets_added), ...
-%         'bs', 'MarkerFaceColor', 'b', 'MarkerSize', 7, 'DisplayName', 'Manually added');
-% end
-% if ~isempty(insp_onsets_final)
-%     plot(t_img(insp_onsets_final), breath(insp_onsets_final), ...
-%         'ro', 'MarkerFaceColor', 'r', 'MarkerSize', 4, 'DisplayName', 'Final accepted');
-%     xline(t_img(insp_onsets_final), 'r:');
-% end
-% legend('Location', 'best');
-% xlabel('Time (s)'); ylabel('Breath (z)');
-% title(sprintf('Final: %d peaks  (auto=%d, +%d added, -%d deleted)', ...
-%     numel(insp_onsets_final), numel(insp_onsets_auto), ...
-%     numel(insp_onsets_added), numel(insp_onsets_deleted)));
-% grid on; hold off;
-%
-% outFig_peaks = fullfile(folderPath, 'breath_peak_detection_final.png');
-% exportgraphics(fig_qc_final, outFig_peaks, 'ContentType', 'vector');
-% fprintf('Saved final peak detection figure:\n  %s\n', outFig_peaks);
-%
-% % findpeaks parameter struct
-% findpeak_params = struct( ...
-%     'minProm_factor',  minProm_factor, ...
-%     'minProm',         minProm, ...
-%     'minDist_sec',     minDist_sec, ...
-%     'minDist_frames',  minDist, ...
-%     'minHeight',       minHeight, ...
-%     'minWidth_sec',    minWidth_sec, ...
-%     'minWidth_frames', minWidth, ...
-%     'snap_win_sec',    snap_win_sec, ...
-%     'preFrames',       preFrames, ...
-%     'fps',             fs ...
-% );
-%
-% outMat_peaks = fullfile(folderPath, 'breath_peak_data.mat');
-% save(outMat_peaks, ...
-%     'findpeak_params', ...
-%     'insp_onsets_auto', ...
-%     'insp_onsets_added', ...
-%     'insp_onsets_deleted', ...
-%     'insp_onsets_final');
-% fprintf('Saved peak detection data:\n  %s\n', outMat_peaks);
 
 %% Chronux spectrum
 TW_spec = 4;
@@ -315,11 +135,6 @@ params_spec.err    = [2 0.05];
 [Sk_raw, fk_raw] = mtspectrumc(breath, params_spec);
 figure('Color','White');
 plot(fk_raw, Sk_raw,                'k',  'LineWidth', 1.2);
-%hold on;
-%plot(fk_raw, Sconfk_raw(1,:), 'k--','LineWidth', 0.6);
-%hold on;
-%plot(fk_raw, Sconfk_raw(2,:), 'k--','LineWidth', 0.6);
-%hold on;
 xlabel('Frequency (Hz)');
 ylabel('Power');
 xlim([0 10]);
@@ -330,33 +145,7 @@ axis square;
 outFig = fullfile(folderPath, 'breathing_spectrum_raw.png');
 exportgraphics(gcf, outFig, 'ContentType','vector');
 fprintf('Saved breathing spectrum:\n  %s\n', outFig);
-
-% %%
-% [Sk_Sb, fk_Sb, Sconfk_Sb] = mtspectrumc(Sb, params_spec);
-%
-% figure;
-% plot(fk_Sb, Sk_Sb,                'k',  'LineWidth', 1.2);
-% %hold on;
-% %plot(fk_Sb, Sconfk_Sb(1,:), 'k--','LineWidth', 0.6);
-% %hold on;
-% %plot(fk_Sb, Sconfk_Sb(2,:), 'k--','LineWidth', 0.6);
-% %hold on;
-% xlabel('Frequency (Hz)');
-% ylabel('Power');
-% xlim([0 10]);
-% grid('on');
-
 %% ------------------- FIGURE 1: BREATH + STACKED dFF (Top 10 ROIs) --------
-
-% plv_vals(isnan(plv_vals)) = 0;
-% % sort PLV in DESCENDING order (highest first)
-% [~, idx_sort] = sort(plv_vals, 'descend');
-% % ---- choose only top 10 ROIs ----
-% nTop = min(10, N);
-% idx_top = idx_sort(1:nTop);
-% % extract only these ROIs
-% X_top = dFF(:, idx_top);           % [T_img x nTop]
-
 T_img = numel(breath);
 
 % global amplitude
@@ -370,7 +159,7 @@ for k = 1:N_roi
 end
 
 % y-ticks and labels
-yt  = 0:gap:gap*(N_roi-1);                    % positions (bottom → top)
+yt  = 0:gap:gap*(N_roi-1);                    % positions (bottom -> top)
 ytl = roi_ids(end:-1:1);                      % labels (bottom = lowest ROI)
 
 figure('Position',[200 200 900 700]);
@@ -401,20 +190,13 @@ ax2 = nexttile(2, [2 1]);
 hold(ax2,'on');
 
 for kk = 1:N_roi
-
-    % main trace
-    plot(ax2, t_img, Y(:,kk), 'Color', 'k', 'LineWidth', 0.5);
-
-    % % --- ROI spike overlay using S ---
-    % idx_evt = find(S(:, roi_idx) ~= 0);   % S is [T_img x N]
-    % if ~isempty(idx_evt)
-    %     t_ev = t_img(idx_evt);
-    %     y_ev = Y(idx_evt, kk)+0.03;           % already offset version
-    %     plot(ax2, t_ev, y_ev, '.', ...
-    %          'MarkerFaceColor', 'w', ...
-    %          'MarkerEdgeColor', 'r', ...
-    %          'MarkerSize', 8);
-    % end
+    % color spiking ROIs orange
+    if ismember(kk, roiSpk_id)
+        trace_color = [1 0 0];
+    else
+        trace_color = [0 0 0];
+    end
+    plot(ax2, t_img, Y(:,kk), 'Color', trace_color, 'LineWidth', 0.5);
 end
 
 xlim(ax2, [t_img(1) t_img(end)]);
@@ -429,7 +211,7 @@ title(ax2, '\DeltaF/F');
 grid(ax2,'off');
 
 % SCALE BAR
-dFF_scale = 0.2;     % 0.2 ΔF/F vertical bar
+dFF_scale = 0.2;     % 0.2 dF/F vertical bar
 
 % position vertical bar near right
 x0 = 1*(t_img(end));
@@ -440,7 +222,6 @@ text(ax2, x0+0.5, dFF_scale + 0.05*dFF_scale, ...
     sprintf('%.2f \\DeltaF/F', dFF_scale), ...
     'VerticalAlignment','bottom','HorizontalAlignment','center', ...
     'FontSize', 10);
-%xline(t_b, 'LineWidth',0.1);
 hold(ax2,'off');
 
 % Save breathing spectrum
@@ -476,10 +257,15 @@ ax2b = nexttile(2, [2 1]);
 hold(ax2b,'on');
 
 for kk = 1:N_roi
-    plot(ax2b, t_img, Y(:,kk), 'Color', 'k', 'LineWidth', 0.5);
+    if ismember(kk, roiSpk_id)
+        trace_color = [1 0 0];
+    else
+        trace_color = [0 0 0];
+    end
+    plot(ax2b, t_img, Y(:,kk), 'Color', trace_color, 'LineWidth', 1);
 end
 
-xline(ax2b, t_b, 'Color', [0.4 0.4 0.4], 'LineWidth', 0.1);
+xline(ax2b, t_b, 'Color', [1 0.1 0.1], 'LineWidth', 0.3);
 
 xlim(ax2b, [t_mid(1) t_mid(end)]);
 ylim(ax2b, [-gap, gap*(N_roi-1)+gap]);
@@ -501,11 +287,95 @@ outFig = fullfile(folderPath, 'breath_N_dFF_mid10s.png');
 exportgraphics(gcf, outFig, 'ContentType','vector');
 fprintf('Saved middle 10 s zoom:\n  %s\n', outFig);
 
+%% Figure 2: Plot breath and detected calcium spk
+fs   = fps_img;
+
+% build stacked matrix (highest at top)
+Y = zeros(T_img, nSpkROI);
+for k = 1:nSpkROI
+    i = roiSpk_id(k);
+    Y(:,k) = dFF(:,i) + 1.5*gap*(nSpkROI - k);
+end
+
+% y-tick positions and labels for spiking ROIs (ascending position, bottom=last ROI)
+yt_spk  = fliplr(1.5*gap*(nSpkROI - (1:nSpkROI)));
+ytl_spk = arrayfun(@(id) sprintf('ROI#%02d', id), roiSpk_id(end:-1:1), 'UniformOutput', false);
+
+figure('Position',[200 200 900 700]);
+tiledlayout(3,1,'TileSpacing','compact','Padding','compact');
+ax1 = nexttile(1);
+plot(ax1, t_img, -breath, 'Color', 'k', 'LineWidth',1.2); xlim([0 30]);
+xline(ax1, t_b, 'Color', [1 0.1 0.1], 'LineWidth', 0.3);
+
+ax2 = nexttile(2, [2 1]);
+plot(ax2, t_img, Y, 'Color', 'k', 'LineWidth',0.8); xlim([0 30]);
+xline(ax2, t_b, 'Color', [1 0.1 0.1], 'LineWidth', 0.3);
+
+off = 1.5*gap*(nSpkROI - (1:nSpkROI));
+
+tickCenter = off - 0.50*gap;
+tickHalf   = 0.12*gap;
+
+hold on
+for k = 1:nSpkROI
+    spk = find(ca_spk_train(:,k));
+    if isempty(spk), continue; end
+
+    x = spk;
+    xx = [x(:) x(:)]';
+    yy = [(tickCenter(k)-tickHalf)*ones(numel(spk),1), ...
+          (tickCenter(k)+tickHalf)*ones(numel(spk),1)]';
+
+    plot(xx/fs, yy, 'k', 'LineWidth', 1);
+end
+yticks(ax2, yt_spk);
+yticklabels(ax2, ytl_spk);
+ylabel(ax2, 'ROI#');
+xlabel('Time (s)')
+
+outFig = fullfile(folderPath, 'breath_ca_spk_30s.png');
+exportgraphics(gcf, outFig, 'ContentType','vector');
+fprintf('Saved breath+ca spk (30s):\n  %s\n', outFig);
+
+figure('Position',[200 200 900 700]);
+tiledlayout(3,1,'TileSpacing','compact','Padding','compact');
+ax1 = nexttile(1);
+plot(ax1, t_img, -breath, 'Color', 'k', 'LineWidth',1.2); xlim([0 T_img/fs]);
+xline(ax1, t_b, 'Color', [1 0.1 0.1], 'LineWidth', 0.3);
+
+ax2 = nexttile(2, [2 1]);
+plot(ax2, t_img, Y, 'Color', 'k', 'LineWidth',0.8); xlim([0 T_img/fs]);
+xline(ax2, t_b, 'Color', [1 0.1 0.1], 'LineWidth', 0.3);
+
+off = 1.5*gap*(nSpkROI - (1:nSpkROI));
+
+tickCenter = off - 0.50*gap;
+tickHalf   = 0.12*gap;
+
+hold on
+for k = 1:nSpkROI
+    spk = find(ca_spk_train(:,k));
+    if isempty(spk), continue; end
+
+    x = spk;
+    xx = [x(:) x(:)]';
+    yy = [(tickCenter(k)-tickHalf)*ones(numel(spk),1), ...
+          (tickCenter(k)+tickHalf)*ones(numel(spk),1)]';
+
+    plot(xx/fs, yy, 'k', 'LineWidth', 1);
+end
+yticks(ax2, yt_spk);
+yticklabels(ax2, ytl_spk);
+ylabel(ax2, 'ROI#');
+xlabel('Time (s)')
+
+outFig = fullfile(folderPath, 'breath_ca_spk_full.png');
+exportgraphics(gcf, outFig, 'ContentType','vector');
+fprintf('Saved breath+ca spk (full):\n  %s\n', outFig);
 
 %% ---- Figure 3. Inspiration-triggered dFF ----
 
-fs   = fps_img;
-win  = round(0.5 * fs);          % ±0.5 s
+win  = round(0.5 * fs);          % +/-0.5 s
 t_evt = (-win:win) / fs;
 
 T_img = size(dFF,1);
@@ -517,7 +387,7 @@ fprintf('Event-triggered : using %d inspiration onsets.\n', nEv);
 dff_evt_seg_all = cell(N_roi,1);
 
 for i = 1:N_roi
-    roi_trace = dFF(:, i);               % RAW ΔF/F
+    roi_trace = dFF(:, i);               % RAW dF/F
 
     seg = zeros(nEv, 2*win+1);
     for e = 1:nEv
@@ -530,7 +400,7 @@ end
 
 % ---------- Per-ROI event-triggered overlays (all trials + mean, RAW dFF) ----------
 
-figure('Name', (sprintf('Event-triggered dFF (n=%d breaths)', size(seg,1))));
+figure('Name', (sprintf('Event-triggered dFF (n=%d breaths)', nEv)));
 
 for i = 1:N_roi
     seg = dff_evt_seg_all{i};    % nEv x (2*win+1)
@@ -538,14 +408,14 @@ for i = 1:N_roi
         continue;
     end
 
-    % average for this ROI (RAW ΔF/F)
+    % average for this ROI (RAW dF/F)
     dff_avg = mean(seg, 1);
 
+    subplot(ceil(N_roi/10), 10, i);
     hold on;
 
-    subplot(ceil(N_roi/10), 10, i);
     % all individual trials
-    plot(t_evt, seg', 'Color', [0.8, 0.8, 0.8], 'LineWidth', 0.7); hold on;
+    plot(t_evt, seg', 'Color', [0.8, 0.8, 0.8], 'LineWidth', 0.7);
     % overlay mean
     plot(t_evt, dff_avg, 'Color', 'k', 'LineWidth', 2);
 
@@ -557,7 +427,6 @@ for i = 1:N_roi
     ylabel('\DeltaF/F');
     title(sprintf('ROI#%d', i));
 
-    %grid on;
     hold off;
     axis square;
 
@@ -567,232 +436,297 @@ outFig = fullfile(folderPath, 'triggered_avg.png');
 exportgraphics(gcf, outFig, 'ContentType','vector');
 fprintf('Saved triggered average:\n  %s\n', outFig);
 
-%% ---- Figure 4. Calcium-triggered average of breathing (selected ROIs) ----
+%% ---- Figure 4. Per-ROI calcium-triggered breathing overlays ----
 
-% Select ROIs to run peak detection on (only well-isolated cells)
-keepIdx  = 6;          % edit to choose which ROIs
-dFF_keep = dFF(:, keepIdx);
-nKeep    = numel(keepIdx);
-
-win_ca   = round(1.0 * fs);          % ±1 s window around calcium peak
+win_ca = round(0.5 * fs);      % +/-0.5 s window for calcium-triggered breathing
 t_ca_evt = (-win_ca:win_ca) / fs;
 
-% Peak detection params — tweak per dataset
-minProm_ca = 0.1;                     % prominence threshold in dF/F units
-minDist_ca = round(fs * 0.2);         % min 1 s between peaks (refractory)
+for k = 1:nSpkROI
+    roi_id = roiSpk_id(k);
+    ca_frames = ca_spk_id{k};       % calcium spike frame indices for this ROI
+    nCaEv = numel(ca_frames);
 
-[~, ca_onsets] = findpeaks(dFF_keep, ...
-    'MinPeakProminence', minProm_ca, ...
-    'MinPeakDistance',   minDist_ca);
+    if nCaEv == 0, continue; end
 
-% local filter only for windowed segment extraction
-ca_onsets_ev = ca_onsets(ca_onsets > win_ca & ca_onsets < T_img - win_ca);
-nEv_ca = numel(ca_onsets_ev);
+    % --- LEFT: breath-triggered dFF overlay ---
+    seg_breath = dff_evt_seg_all{roi_id};   % nEv x (2*win+1)
+    dff_avg = mean(seg_breath, 1);
 
-fprintf('ROI#%02d : %d calcium peaks detected.\n', keepIdx, nEv_ca);
+    % --- RIGHT: calcium-triggered breathing segments ---
+    ca_valid = ca_frames(ca_frames > win_ca & ca_frames < T_img - win_ca);
+    nCaValid = numel(ca_valid);
+    seg_ca = zeros(nCaValid, 2*win_ca+1);
+    for e = 1:nCaValid
+        c = ca_valid(e);
+        seg_ca(e,:) = breath(c-win_ca : c+win_ca);
+    end
+    breath_avg = mean(seg_ca, 1);
 
-seg_ca = zeros(nEv_ca, 2*win_ca+1);
-for e = 1:nEv_ca
-    c = ca_onsets_ev(e);
-    seg_ca(e,:) = breath(c-win_ca : c+win_ca);
+    % --- Figure ---
+    fig4 = figure('Color','w', 'Name', sprintf('ROI#%02d triggered avg', roi_id), ...
+                  'Position', [100 100 900 400]);
+
+    % LEFT subplot: breath-triggered dFF
+    subplot(1,2,1);
+    hold on;
+    plot(t_evt, seg_breath', 'Color', [0.8 0.8 0.8], 'LineWidth', 0.7);
+    plot(t_evt, dff_avg, 'Color', 'k', 'LineWidth', 2);
+    xline(0, '--', 'Color', [0.4 0.4 0.4]);
+    yline(0, '--', 'Color', [0.6 0.6 0.6]);
+    xlabel('Time from inspiration onset (s)');
+    ylabel('\DeltaF/F');
+    title(sprintf('ROI#%02d  breath-trig dFF (n=%d)', roi_id, nEv));
+    axis square;
+    hold off;
+
+    % RIGHT subplot: calcium-triggered breathing
+    subplot(1,2,2);
+    hold on;
+    if nCaValid > 0
+        plot(t_ca_evt, seg_ca', 'Color', [0.8 0.8 0.8], 'LineWidth', 0.7);
+        plot(t_ca_evt, breath_avg, 'Color', 'k', 'LineWidth', 2);
+    end
+    xline(0, '--', 'Color', [0.4 0.4 0.4]);
+    yline(0, '--', 'Color', [0.6 0.6 0.6]);
+    xlabel('Time from Ca^{2+} spike (s)');
+    ylabel('Breathing (z-score)');
+    title(sprintf('ROI#%02d  Ca-trig breath (n=%d)', roi_id, nCaValid));
+    axis square;
+    hold off;
+
+    % Save
+    outPng = fullfile(folderPath, sprintf('ROI%02d_triggered_avg.png', roi_id));
+    exportgraphics(fig4, outPng, 'ContentType','vector');
+    outFigFile = fullfile(folderPath, sprintf('ROI%02d_triggered_avg.fig', roi_id));
+    savefig(fig4, outFigFile);
+    fprintf('Saved triggered avg for ROI#%02d:\n  %s\n  %s\n', roi_id, outPng, outFigFile);
 end
 
-% ---------- QC: raw dF/F with detected calcium peaks ----------
-figure('Name', 'Calcium peak detection QC', 'Color', 'w');
-tiledlayout('flow');
-
-nexttile;
-plot(t_img, dFF_keep, 'k'); hold on;
-if ~isempty(ca_onsets)
-    plot(t_img(ca_onsets), dFF_keep(ca_onsets), 'ro', ...
-        'MarkerFaceColor', 'r', 'MarkerSize', 3);
-end
-title(sprintf('ROI#%d  (n=%d)', keepIdx, numel(ca_onsets)));
-xlabel('Time (s)');
-ylabel('\DeltaF/F');
-
-% outFig = fullfile(folderPath, sprintf('ca_peak_detection_ROI%02d.png',keepIdx));
-% exportgraphics(gcf, outFig, 'ContentType', 'vector');
-% fprintf('Saved calcium peak detection:\n  %s\n', outFig);
-
-%%
-% ---------- Per-ROI calcium-triggered breathing overlays ----------
-
-figure('Name', sprintf('Calcium-triggered breathing avg (n=%d ROIs)', nKeep));
-
-breath_avg = mean(seg_ca, 1);
-nEv_ca     = size(seg_ca, 1);
-
-plot(t_ca_evt, seg_ca',   'Color', [0.8 0.8 0.8], 'LineWidth', 0.7); hold on;
-plot(t_ca_evt, breath_avg, 'Color', 'k',           'LineWidth', 2);
-
-xline(0, '--', 'Color', [0.4 0.4 0.4]);   % calcium peak at t = 0
-yline(0, '--', 'Color', [0.6 0.6 0.6]);
-
-xlabel('Time from Ca^{2+} peak (s)');
-ylabel('Breathing (z-score)');
-title(sprintf('ROI#%d  (n=%d)', keepIdx, nEv_ca));
-
-axis square;
-
-outFig = fullfile(folderPath, 'ca_triggered_breath_avg.png');
-exportgraphics(gcf, outFig, 'ContentType', 'vector');
-outFig = fullfile(folderPath, 'ca_triggered_breath_avg.fig');
-savefig(gcf, outFig);
-fprintf('Saved calcium-triggered breathing average:\n  %s\n', outFig);
-
-%% ---- Figure 5: dt_closest analysis (raster + histogram + permutation) ----
+%% ---- Figure 5: dt_last analysis (raster + histogram + permutation) ----
+% For each spiking ROI, compute time from LAST inspiration (at or before)
+% each calcium spike.  dt_last >= 0 always.
 
 win5   = round(2.5 * fs);
-w_ms   = 100;
+w_ms   = 150;
 w_sec  = w_ms / 1000;
 M_shuf = 3000;
 
-% ---- Assign each Ca2+ event to a breath interval ----
-ca_ev    = ca_onsets;
 b_frames = sort(insp_onsets(:));
-[~, ~, bin_idx] = histcounts(ca_ev, b_frames);
-keep_ca = (bin_idx >= 1) & (bin_idx <= numel(b_frames) - 1);
-ca_in   = ca_ev(keep_ca);
-bin_in  = bin_idx(keep_ca);
-nEv_in  = numel(ca_in);
-Delta_k = diff(b_frames) / fs;
-t_pre   = (ca_in - b_frames(bin_in)) / fs;
-t_post  = Delta_k(bin_in) - t_pre;
+Delta_k  = diff(b_frames) / fs;       % breath interval durations (s)
 
-% ---- Compute signed dt_closest ----
-dt_closest = t_pre;
-closer_to_next = t_post < t_pre;
-dt_closest(closer_to_next) = -t_post(closer_to_next);
+% Collect per-ROI results
+dtlast_results = struct();
 
-% ---- Build insp_rel only for ca_in events ----
-insp_rel_in = cell(nEv_in, 1);
-for e = 1:nEv_in
-    c      = ca_in(e);
-    nearby = insp_onsets(insp_onsets >= (c-win5) & insp_onsets <= (c+win5));
-    insp_rel_in{e} = (nearby - c) / fs;
-end
+for k = 1:nSpkROI
+    roi_id   = roiSpk_id(k);
+    ca_ev    = ca_spk_id{k}(:);        % calcium spike frames for this ROI
+    nCaTotal = numel(ca_ev);
 
-% ---- Histogram bins centred on 0 ----
-half_max  = max(Delta_k) / 2;
-bin_edges = linspace(-half_max, half_max, 25);
-bin_ctrs  = (bin_edges(1:end-1) + bin_edges(2:end)) / 2;
-nBins     = numel(bin_ctrs);
-H_obs     = histcounts(dt_closest, bin_edges, 'Normalization', 'probability') * 100;
+    if nCaTotal == 0, continue; end
 
-% ---- Observed scan statistic ----
-S_obs = breath_scan_stat(dt_closest, w_sec);
+    % ---- Assign each Ca event to its breath interval ----
+    % bin_idx(j) = i means ca_ev(j) falls in [b_frames(i), b_frames(i+1))
+    [~, ~, bin_idx] = histcounts(ca_ev, b_frames);
+    keep_ca = (bin_idx >= 1) & (bin_idx <= numel(b_frames) - 1);
+    ca_in   = ca_ev(keep_ca);
+    bin_in  = bin_idx(keep_ca);
+    nEv_in  = numel(ca_in);
 
-% ---- Shuffle (interval-based, recompute dt_closest from shuffled position) ----
-S_shuf = nan(M_shuf, 1);
-H_shuf = nan(M_shuf, nBins);
-for m = 1:M_shuf
-    t_pre_sh  = rand(nEv_in, 1) .* Delta_k(bin_in);
-    t_post_sh = Delta_k(bin_in) - t_pre_sh;
-    dt_sh     = t_pre_sh;
-    dt_sh(t_post_sh < t_pre_sh) = -t_post_sh(t_post_sh < t_pre_sh);
-    S_shuf(m)    = breath_scan_stat(dt_sh, w_sec);
-    H_shuf(m,:)  = histcounts(dt_sh, bin_edges, 'Normalization', 'probability') * 100;
-end
-p_val   = (1 + sum(S_shuf >= S_obs)) / (M_shuf + 1);
-n_close = sum(abs(dt_closest) <= w_sec);
-fprintf('ROI#%02d : S_obs=%d  median(S_null)=%.1f  p=%.4f  (w=%.2fs, M=%d, n=%d)\n', ...
-    keepIdx, S_obs, median(S_shuf), p_val, w_sec, M_shuf, nEv_in);
-
-% ---- Color by significance ----
-sig_color = [1 0.1 0.1];
-ns_color  = [0.1 0.1 0.1];
-obs_color = double(p_val < 0.05) * sig_color + double(p_val >= 0.05) * ns_color;
-
-% ---- Figure: 1x3 layout ----
-fig5 = figure('Color', 'w', ...
-    'Name', sprintf('dt_closest: ROI#%d', keepIdx), ...
-    'Position', [0 0 1100 400]);
-
-% ---- Subplot 1: Raster sorted by dt_closest ascending ----
-ax_rast = subplot(1,3,1);
-hold(ax_rast, 'on');
-
-[~, sort_idx] = sort(dt_closest, 'ascend');
-
-for row = 1:nEv_in
-    e       = sort_idx(row);
-    t_ticks = insp_rel_in{e};
-    for tt = 1:numel(t_ticks)
-        plot(ax_rast, [t_ticks(tt) t_ticks(tt)], [row-0.4  row+0.4], ...
-            'k', 'LineWidth', 1);
+    if nEv_in == 0
+        fprintf('ROI#%02d : no calcium events within breath intervals, skipping.\n', roi_id);
+        continue;
     end
+
+    % ---- dt_last: time from last inspiration (at or before) ----
+    dt_last = (ca_in - b_frames(bin_in)) / fs;   % always >= 0
+
+    % ---- Build insp_rel for raster ----
+    insp_rel_in = cell(nEv_in, 1);
+    for e = 1:nEv_in
+        c      = ca_in(e);
+        nearby = insp_onsets(insp_onsets >= (c-win5) & insp_onsets <= (c+win5));
+        insp_rel_in{e} = (nearby - c) / fs;
+    end
+
+    % ---- Histogram bins (one-sided, 0 to max interval) ----
+    half_max   = max(Delta_k);
+    bin_number = round(half_max / (1/fs));
+    if bin_number < 10, bin_number = 10; end
+    if mod(bin_number,2), bin_number = bin_number + 1; end
+
+    bin_edges_dt = linspace(0, half_max, bin_number);
+    bin_ctrs     = (bin_edges_dt(1:end-1) + bin_edges_dt(2:end)) / 2;
+    nBins        = numel(bin_ctrs);
+    H_obs        = histcounts(dt_last, bin_edges_dt, 'Normalization','probability') * 100;
+
+    % ---- Observed scan statistic ----
+    S_obs = breath_scan_stat(dt_last, w_sec);
+
+    % ---- Shuffle (interval-based) ----
+    S_shuf = nan(M_shuf, 1);
+    H_shuf = nan(M_shuf, nBins);
+    for m = 1:M_shuf
+        % Place each calcium event uniformly within its breath interval
+        dt_last_sh    = rand(nEv_in, 1) .* Delta_k(bin_in);
+        S_shuf(m)     = breath_scan_stat(dt_last_sh, w_sec);
+        H_shuf(m,:)   = histcounts(dt_last_sh, bin_edges_dt, 'Normalization','probability') * 100;
+    end
+    p_val   = (1 + sum(S_shuf >= S_obs)) / (M_shuf + 1);
+    n_close = sum(dt_last <= w_sec);
+    fprintf('ROI#%02d : S_obs=%d  median(S_null)=%.1f  p=%.4f  (w=%.2fs, M=%d, n=%d)\n', ...
+        roi_id, S_obs, median(S_shuf), p_val, w_sec, M_shuf, nEv_in);
+
+    % ---- Color by significance ----
+    sig_color = [1 0.1 0.1];
+    ns_color  = [0.1 0.1 0.1];
+    obs_color = double(p_val < 0.05) * sig_color + double(p_val >= 0.05) * ns_color;
+
+    % ---- Figure: 1x3 layout ----
+    fig5 = figure('Color', 'w', ...
+        'Name', sprintf('dt_last: ROI#%02d', roi_id), ...
+        'Position', [0 0 1100 400]);
+
+    % ---- Subplot 1: Raster sorted by dt_last ascending ----
+    ax_rast = subplot(1,3,1);
+    hold(ax_rast, 'on');
+
+    [~, sort_idx] = sort(dt_last, 'ascend');
+
+    for row = 1:nEv_in
+        e       = sort_idx(row);
+        t_ticks = insp_rel_in{e};
+        for tt = 1:numel(t_ticks)
+            plot(ax_rast, [t_ticks(tt) t_ticks(tt)], [row-0.4  row+0.4], ...
+                'k', 'LineWidth', 1);
+        end
+    end
+
+    xline(ax_rast, 0, 'r--', 'LineWidth', 1);
+    xlim(ax_rast, [-2.5 2.5]);
+    ylim(ax_rast, [0 nEv_in+1]);
+    set(ax_rast, 'YDir', 'reverse');
+    xlabel(ax_rast, 'Time from Ca^{2+} event (s)');
+    ylabel(ax_rast, sprintf('Ca^{2+} event # \n (sorted by dt_{last})'), 'HorizontalAlignment', 'center');
+    title(ax_rast, sprintf('ROI#%02d  (%d events in %d breaths)', roi_id, nEv_in, sum(Sb)));
+    hold(ax_rast, 'off');
+
+    % ---- Subplot 2: Histogram vs shuffle envelope ----
+    ax_hist = subplot(1,3,2);
+    hold(ax_hist, 'on');
+
+    % Shuffle envelope (2.5-97.5 percentile band)
+    H_mean = mean(H_shuf, 1);
+    H_lo   = prctile(H_shuf,  2.5, 1);
+    H_hi   = prctile(H_shuf, 97.5, 1);
+
+    be = bin_edges_dt;
+    [xs_hi, ys_hi] = stairs(be, [H_hi  H_hi(end)]);
+    [xs_lo, ys_lo] = stairs(be, [H_lo  H_lo(end)]);
+
+    fill(ax_hist, [xs_hi; flipud(xs_lo)], [ys_hi; flipud(ys_lo)], ...
+         [0.75 0.75 0.75], 'EdgeColor', 'none', 'FaceAlpha', 0.6);
+    stairs(ax_hist, be, [H_mean H_mean(end)], 'Color', [0.4 0.4 0.4], 'LineWidth', 1.5);
+    stairs(ax_hist, be, [H_obs  H_obs(end)],  'Color', obs_color, 'LineWidth', 2.5);
+
+    xlabel(ax_hist, 'Time from last inspiration (s)');
+    ylabel(ax_hist, 'Proportion of Ca^{2+} events (%)');
+    legend(ax_hist, {'95% shuffle envelope', 'Shuffle mean', 'Observed'}, 'Location', 'northeast');
+    xlim(ax_hist, [0 half_max]);
+    ylim(ax_hist, [0 40]);
+    axis(ax_hist, 'square');
+    hold(ax_hist, 'off');
+
+    % ---- Subplot 3: Scan statistic null distribution ----
+    ax_scan = subplot(1,3,3);
+    hold(ax_scan, 'on');
+
+    S_shuf_pct = S_shuf / nEv_in * 100;
+    S_obs_pct  = S_obs  / nEv_in * 100;
+
+    histogram(ax_scan, S_shuf_pct, 'Normalization', 'percentage', ...
+              'FaceColor', [0.65 0.65 0.65], 'EdgeColor', 'none', 'FaceAlpha', 0.85);
+    xline(ax_scan, S_obs_pct, 'Color', obs_color, 'LineWidth', 2);
+
+    xlabel(ax_scan, sprintf('Max %%events in a %d-ms sliding window', w_ms));
+    ylabel(ax_scan, '% Shuffles');
+
+    xlim(ax_scan, [0 100]);
+    ylim(ax_scan, [0 30]);
+    yl_sc = ylim(ax_scan);  xl_sc = xlim(ax_scan);
+    text(ax_scan, mean(xl_sc), yl_sc(2) + 2, ...
+         sprintf('%d/%d  (p=%.3f)', S_obs, nEv_in, p_val), ...
+         'Color', obs_color, 'FontSize', 11, ...
+         'HorizontalAlignment','center', 'VerticalAlignment','middle');
+    axis(ax_scan, 'square');
+    box(ax_scan, 'on');
+    hold(ax_scan, 'off');
+
+    % ---- Save figure ----
+    outFig_fig = fullfile(folderPath, sprintf('calcium_breath_dtlast_ROI%02d.fig', roi_id));
+    savefig(fig5, outFig_fig);
+    outFig_png = fullfile(folderPath, sprintf('calcium_breath_dtlast_ROI%02d.png', roi_id));
+    exportgraphics(fig5, outFig_png, 'ContentType', 'vector');
+    fprintf('Saved dt_last figure for ROI#%02d:\n  %s\n  %s\n', roi_id, outFig_fig, outFig_png);
+
+    % ---- Store per-ROI results ----
+    dtlast_results(k).roi_id    = roi_id;
+    dtlast_results(k).dt_last   = dt_last;
+    dtlast_results(k).ca_in     = ca_in;
+    dtlast_results(k).bin_in    = bin_in;
+    dtlast_results(k).nEv_in    = nEv_in;
+    dtlast_results(k).S_obs     = S_obs;
+    dtlast_results(k).S_shuf    = S_shuf;
+    dtlast_results(k).p_val     = p_val;
+    dtlast_results(k).n_close   = n_close;
+    dtlast_results(k).H_obs     = H_obs;
+    dtlast_results(k).H_shuf    = H_shuf;
+    dtlast_results(k).bin_edges = bin_edges_dt;
+    dtlast_results(k).half_max  = half_max;
 end
 
-xline(ax_rast, 0, 'r--', 'LineWidth', 1);
-xlim(ax_rast, [-2.5 2.5]);
-ylim(ax_rast, [0 nEv_in+1]);
-set(ax_rast, 'YDir', 'reverse');
-xlabel(ax_rast, 'Time from Ca^{2+} event (s)');
-ylabel(ax_rast, 'Ca^{2+} event #  (sorted by dt_{closest})');
-title(ax_rast, sprintf('ROI%02d  (%d events in %d breaths)', keepIdx, nEv_in, sum(Sb)));
-hold(ax_rast, 'off');
+%% filter breathing signal for hilbert
+d = designfilt("lowpassfir", ...
+    PassbandFrequency=0.2,StopbandFrequency=0.25, ...
+    PassbandRipple=1,StopbandAttenuation=60, ...
+    DesignMethod="equiripple");
+breath_filt = filtfilt(d,breath);
 
-% ---- Subplot 2: Histogram vs shuffle envelope ----
-ax_hist = subplot(1,3,2);
-hold(ax_hist, 'on');
+%% hilbert transform of breathing to extract phase
+y = hilbert(breath_filt);
+phi = angle(y);
+%%
+% figure;
+% subplot(3,1,1);
+% plot(t_breath, breath);
+%
+% subplot(3,1,2);
+% plot(t_breath, breath_filt);
+%
+% subplot(3,1,3);
+% plot(t_breath, phi);
 
-% Shuffle envelope (2.5–97.5 percentile band)
-H_mean = mean(H_shuf, 1);
-H_lo   = prctile(H_shuf,  2.5, 1);
-H_hi   = prctile(H_shuf, 97.5, 1);
+%% Figure 6: Phase histogram per spiking ROI
+for k = 1:nSpkROI
+    roi_id = roiSpk_id(k);
+    spk_frames = ca_spk_id{k};
+    spk_frames = spk_frames(spk_frames >= 1 & spk_frames <= numel(phi));
+    if isempty(spk_frames), continue; end
 
-be = bin_edges(1:end-1);
-[xs_hi, ys_hi] = stairs(be, H_hi);
-[xs_lo, ys_lo] = stairs(be, H_lo);
+    ca_phi = phi(spk_frames);
 
-fill(ax_hist, [xs_hi; flipud(xs_lo)], [ys_hi; flipud(ys_lo)], ...
-     [0.75 0.75 0.75], 'EdgeColor', 'none', 'FaceAlpha', 0.6);
-stairs(ax_hist, be, H_mean, 'Color', [0.4 0.4 0.4], 'LineWidth', 1.5);
-stairs(ax_hist, be, H_obs,  'Color', obs_color, 'LineWidth', 2.5);
+    figure('Color','white');
+    histogram(ca_phi, 40, 'Normalization','percentage');
+    xlim([-pi pi]);
+    ylim([0 25]);
+    axis square;
+    xlabel('Phase (rad)');
+    ylabel('% events');
+    title(sprintf('ROI#%02d  phase preference (n=%d)', roi_id, numel(ca_phi)));
 
-xline(ax_hist, 0, 'r--', 'LineWidth', 1);
-
-xlabel(ax_hist, 'dt_{closest}  (s)');
-ylabel(ax_hist, 'Proportion of Ca^{2+} events (%)');
-legend(ax_hist, {'95% shuffle envelope', 'Shuffle mean', 'Observed'}, 'Location', 'northeast');
-xlim(ax_hist, [-half_max half_max]);
-ylim(ax_hist, [0 40]);
-axis(ax_hist, 'square');
-hold(ax_hist, 'off');
-
-% ---- Subplot 3: Scan statistic null distribution ----
-ax_scan = subplot(1,3,3);
-hold(ax_scan, 'on');
-
-S_shuf_pct = S_shuf / nEv_in * 100;
-S_obs_pct  = S_obs  / nEv_in * 100;
-
-histogram(ax_scan, S_shuf_pct, 'Normalization', 'percentage', ...
-          'FaceColor', [0.65 0.65 0.65], 'EdgeColor', 'none', 'FaceAlpha', 0.85);
-xline(ax_scan, S_obs_pct, 'Color', obs_color, 'LineWidth', 2);
-
-xlabel(ax_scan, sprintf('%% events within +/-%d ms of nearest inspiration', w_ms));
-ylabel(ax_scan, '% Shuffles');
-
-yl_sc = ylim(ax_scan);  xl_sc = xlim(ax_scan);
-text(ax_scan, mean(xl_sc), yl_sc(2) + 1, ...
-     sprintf('%d/%d  (p=%.3f)', n_close, nEv_in, p_val), ...
-     'Color', obs_color, 'FontSize', 11, ...
-     'VerticalAlignment', 'bottom', 'HorizontalAlignment', 'center');
-
-xlim(ax_scan, [0 100]);
-ylim(ax_scan, [0 30]);
-axis(ax_scan, 'square');
-box(ax_scan, 'on');
-hold(ax_scan, 'off');
-
-% ---- Save figure ----
-outFig_fig = fullfile(folderPath, sprintf('calcium_breath_dtclosest_ROI%02d.fig', keepIdx));
-savefig(fig5, outFig_fig);
-outFig_png = fullfile(folderPath, sprintf('calcium_breath_dtclosest_ROI%02d.png', keepIdx));
-exportgraphics(fig5, outFig_png, 'ContentType', 'vector');
-fprintf('Saved dt_closest figure:\n  %s\n  %s\n', outFig_fig, outFig_png);
+    outFig = fullfile(folderPath, sprintf('phase_hist_ROI%02d.png', roi_id));
+    exportgraphics(gcf, outFig, 'ContentType','vector');
+    fprintf('Saved phase histogram for ROI#%02d:\n  %s\n', roi_id, outFig);
+end
 
 %% ---- Save master file ----
 outMat_master = fullfile(folderPath, 'breath_master_working.mat');
@@ -800,14 +734,12 @@ save(outMat_master, ...
     'folderPath', ...
     'fps_img', 'fps_breath', 'fs', ...
     'breath_peak', ...
-    'keepIdx', 'nKeep', 'minProm_ca', 'minDist_ca', 'win_ca', 't_ca_evt', ...
+    'roiSpk_id', 'nSpkROI', 'ca_spk_data', 'ca_spk_id', 't_spk', ...
     'w_sec', 'M_shuf', 'w_ms', ...
     'win', 't_evt', 'win5', ...
     'breath', 't_img', 'dFF', 'Sb', ...
-    'ca_onsets', 'ca_in', 'bin_in', 'nEv_in', ...
-    'dt_closest', 't_pre', 't_post', 'Delta_k', 'b_frames', ...
-    'S_obs', 'S_shuf', 'p_val', 'n_close', ...
-    'H_obs', 'H_shuf', 'bin_edges', 'half_max', ...
+    'Delta_k', 'b_frames', ...
+    'dtlast_results', ...
     'dff_evt_seg_all');
 fprintf('Saved master file:\n  %s\n', outMat_master);
 
