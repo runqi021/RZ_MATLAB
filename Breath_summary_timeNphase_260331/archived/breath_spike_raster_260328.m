@@ -1,0 +1,444 @@
+%% breath_spike_raster_260328.m
+%  3 plots:
+%    1) Phase-normalized dF/F heatmap per cycle — sig ROIs only, [0,4pi]
+%    2) Coherence polar (clockwise, breath waveform overlay)
+%    3) Spike phase histogram — all spiking ROIs, [0,4pi], Rayleigh test
+%  ── USER PARAMETERS ─────────────────────────────────────────────────────
+clear; close all; clc;
+set(0, 'DefaultAxesFontName', 'Arial');
+set(0, 'DefaultTextFontName', 'Arial');
+
+inputPath       = "D:\batch_dffQC_test_260325\260224_vglut2_soma_g8s\phys\processed\breathing";
+skipIdx         = [];
+fps_img         = 30;
+nDrop           = 30;
+nPhaseBins      = 200;
+TW              = 3;
+f_breath_search = [1.5, 3];
+prcLim          = [0.1 99.9];
+% ──────────────────────────────────────────────────────────────────────────
+
+%% 1 -- Discover sessions
+if exist(fullfile(inputPath, 'ca_spike_data.mat'), 'file') == 2
+    allMat = dir(fullfile(inputPath, 'ca_spike_data.mat'));
+else
+    allMat = dir(fullfile(inputPath, '**', 'ca_spike_data.mat'));
+    keep = true(numel(allMat), 1);
+    skipIdx = skipIdx(skipIdx >= 1 & skipIdx <= numel(allMat));
+    keep(skipIdx) = false;
+    allMat = allMat(keep);
+end
+nSess = numel(allMat);
+fprintf('Found %d sessions\n', nSess);
+
+chronuxDir = fullfile(fileparts(mfilename('fullpath')), 'chronux_2_12');
+if isfolder(chronuxDir) && ~contains(path, 'chronux')
+    addpath(genpath(chronuxDir));
+end
+
+%% 2 -- Collect data
+all_roi = struct('sessIdx',{}, 'roiId',{}, 'dff_phase',{}, ...
+    'nCycles',{}, 'th_k',{}, 'r_k',{}, 'is_sig',{}, 'spike_phase_per_cycle',{});
+all_breath_cycles = [];
+all_frame_phase = [];   % phase of every frame across all cycles (for occupancy PDF)
+
+phase_1cyc = linspace(0, 2*pi, nPhaseBins+1);
+phase_1cyc = phase_1cyc(1:end-1);
+
+for kk = 1:nSess
+    folderPath = allMat(kk).folder;
+    [~, sessName] = fileparts(folderPath);
+
+    bp_file  = dir(fullfile(folderPath, '*breath_peak_data.mat'));
+    sam_hits = dir(fullfile(folderPath, '*cpSAM_output.mat'));
+    csv_hits = dir(fullfile(folderPath, '*snapshot_best-*.csv'));
+    if isempty(bp_file) || isempty(sam_hits) || isempty(csv_hits), continue; end
+
+    Ks = load(fullfile(folderPath, 'ca_spike_data.mat'));
+    roiSpk_id = find(logical(Ks.ifSpike(:)'));
+    if isempty(roiSpk_id), continue; end
+
+    BP = load(fullfile(bp_file(1).folder, bp_file(1).name));
+    insp_onsets = sort(BP.insp_onset_idx(:));
+    fp = BP.findpeak_params;
+    insp_onsets(insp_onsets < nDrop) = [];
+    insp_onsets = insp_onsets - nDrop;
+
+    % Auto-detect fps for this session
+    fs = detect_session_fps(folderPath, fps_img);
+
+    SAMload = load(fullfile(folderPath, sam_hits(1).name));
+    F = SAMload.F;
+    F(1:min(nDrop, size(F,1)), :) = [];
+    dFFout = helper.dFF_RZ(F, 'FPS', fs);
+    dFF = dFFout.dFF;
+    [T, ~] = size(dFF);
+
+    % Breathing signal
+    dlc_raw = readmatrix(fullfile(folderPath, csv_hits(1).name), 'NumHeaderLines', 3);
+    dlc_raw(1:min(nDrop, size(dlc_raw,1)), :) = [];
+    dot_cols = [2 3 4; 5 6 7; 8 9 10; 11 12 13];
+    dot_map  = struct('dot1',1,'dot2',2,'dot3',3,'dot4',4);
+    nDots = numel(fp.dot_selection);
+    traces = NaN(size(dlc_raw,1), nDots);
+    for d = 1:nDots
+        di = dot_map.(fp.dot_selection{d});
+        xc = dlc_raw(:, dot_cols(di,1));
+        yc = dlc_raw(:, dot_cols(di,2));
+        pc = dlc_raw(:, dot_cols(di,3));
+        bad = pc < fp.likelihood_thr;
+        switch fp.coord_types{di}
+            case 'x',         sig = xc;
+            case 'y',         sig = yc;
+            case '-x',        sig = -xc;
+            case '-y',        sig = -yc;
+            case 'magnitude', sig = sqrt(xc.^2 + yc.^2);
+            otherwise,        sig = xc;
+        end
+        sig(bad) = NaN;
+        if sum(~isnan(sig)) >= 2
+            sig = fillmissing(sig, 'linear', 'EndValues','nearest');
+        end
+        traces(:,d) = sig;
+    end
+    switch fp.combine_method
+        case 'sum',  breath_dlc = sum(traces, 2, 'omitnan');
+        otherwise,   breath_dlc = mean(traces, 2, 'omitnan');
+    end
+    if fp.inverted, breath_dlc = -breath_dlc; end
+    breath_dlc = detrend(breath_dlc);
+    breath_dlc = (breath_dlc - mean(breath_dlc)) / std(breath_dlc);
+    nB = numel(breath_dlc);
+    if nB >= T, breath_dlc = breath_dlc(1:T);
+    else,       breath_dlc(end+1:T) = 0; end
+
+    % Breathing PSD for FWHM
+    params_breath.Fs = fs; params_breath.tapers = [TW, 2*TW-1];
+    params_breath.pad = 0; params_breath.fpass = [0.01, fs/2];
+    params_breath.err = [2, 0.05];
+    [Sb, fbC] = mtspectrumc(breath_dlc, params_breath);
+    fbC = fbC(:); Sb = Sb(:);
+    mask_bp = fbC >= f_breath_search(1) & fbC <= f_breath_search(2);
+    [~, rel_idx] = max(Sb(mask_bp));
+    idx_bp = find(mask_bp,1) + rel_idx - 1;
+    half_max = Sb(idx_bp)/2;
+    idx_lo = idx_bp; while idx_lo > 1 && Sb(idx_lo) > half_max, idx_lo = idx_lo-1; end
+    idx_hi = idx_bp; while idx_hi < numel(fbC) && Sb(idx_hi) > half_max, idx_hi = idx_hi+1; end
+    f_fwhm = [fbC(idx_lo), fbC(idx_hi)];
+
+    % Coherence + confC
+    params_coh.Fs = fs; params_coh.tapers = [TW, 2*TW-1];
+    params_coh.pad = 0; params_coh.fpass = f_breath_search;
+    params_coh.err = [2, 0.01];
+    T_coh = min(T, numel(breath_dlc));
+    sig0 = dFF(1:T_coh, roiSpk_id(1)) - mean(dFF(1:T_coh, roiSpk_id(1)));
+    [~, ~, ~, ~, ~, ~, ~, confC_val] = coherencyc(breath_dlc(1:T_coh), sig0, params_coh);
+
+    b_frames = sort(insp_onsets(:));
+    nCycles = numel(b_frames) - 1;
+    if nCycles < 2, continue; end
+
+    % Phase-normalize breathing cycles
+    cyc_mat = nan(nCycles, nPhaseBins);
+    for c = 1:nCycles
+        i1 = b_frames(c); i2 = b_frames(c+1);
+        if i1 >= 1 && i2 <= numel(breath_dlc)
+            chunk = breath_dlc(i1:i2);
+            orig_ph = linspace(0, 2*pi, numel(chunk));
+            cyc_mat(c,:) = interp1(orig_ph, chunk, phase_1cyc, 'linear');
+        end
+    end
+    valid_cyc = ~all(isnan(cyc_mat), 2);
+    all_breath_cycles = [all_breath_cycles; cyc_mat(valid_cyc,:)]; %#ok<AGROW>
+
+    % Collect instantaneous phase of every frame in every cycle
+    for c = 1:nCycles
+        bp1 = b_frames(c); bp2 = b_frames(c+1);
+        L = bp2 - bp1;
+        if bp1 >= 1 && bp2 <= T && L > 0
+            all_frame_phase = [all_frame_phase; ...
+                2*pi * ((0:L-1)' + 0.5) / L]; %#ok<AGROW>
+        end
+    end
+
+    for jj = 1:numel(roiSpk_id)
+        roi_id = roiSpk_id(jj);
+
+        % Phase-normalize dF/F per cycle
+        dff_roi = dFF(:, roi_id);
+        dff_phase = nan(nCycles, nPhaseBins);
+        for c = 1:nCycles
+            i1 = b_frames(c); i2 = b_frames(c+1);
+            if i1 >= 1 && i2 <= T
+                chunk = dff_roi(i1:i2);
+                orig_ph = linspace(0, 2*pi, numel(chunk));
+                dff_phase(c,:) = interp1(orig_ph, chunk, phase_1cyc, 'linear');
+            end
+        end
+
+        % Spike phases per cycle
+        ca_ev = Ks.roi_spikes(roi_id).spike_idx(:);
+        ca_ev = ca_ev(ca_ev >= 1 & ca_ev <= T);
+        spike_phase_per_cycle = cell(nCycles, 1);
+        for c = 1:nCycles
+            bp1 = b_frames(c); bp2 = b_frames(c+1);
+            spk = ca_ev(ca_ev >= bp1 & ca_ev < bp2);
+            if ~isempty(spk)
+                spike_phase_per_cycle{c} = 2*pi * (spk - bp1 + 0.5) / (bp2 - bp1);
+            end
+        end
+
+        % Coherence
+        sig_c = dFF(:, roi_id) - mean(dFF(:, roi_id));
+        [~, C_coh, phi_coh, ~, ~, ~, f_coh] = ...
+            coherencyc(breath_dlc(1:T_coh), sig_c(1:T_coh), params_coh);
+        f_coh = f_coh(:); C_coh = C_coh(:); phi_coh = phi_coh(:);
+        mask_fwhm = f_coh >= f_fwhm(1) & f_coh <= f_fwhm(2);
+        if ~any(mask_fwhm), mask_fwhm = true(size(f_coh)); end
+        r_k  = mean(C_coh(mask_fwhm));
+        th_k = angle(mean(exp(1i * (-phi_coh(mask_fwhm)))));
+        is_sig = r_k > confC_val;
+
+        idx = numel(all_roi) + 1;
+        all_roi(idx).sessIdx = kk;
+        all_roi(idx).roiId = roi_id;
+        all_roi(idx).dff_phase = dff_phase;
+        all_roi(idx).nCycles = nCycles;
+        all_roi(idx).th_k = th_k;
+        all_roi(idx).r_k = r_k;
+        all_roi(idx).is_sig = is_sig;
+        all_roi(idx).spike_phase_per_cycle = spike_phase_per_cycle;
+
+        sig_str = 'SIG'; if ~is_sig, sig_str = 'n.s.'; end
+        fprintf('  ROI#%02d: th=%.0f° r=%.2f %s\n', roi_id, rad2deg(th_k), r_k, sig_str);
+    end
+    fprintf('[%d] %s: %d ROIs, confC=%.3f\n', kk, sessName, numel(roiSpk_id), confC_val);
+end
+
+nROIs = numel(all_roi);
+is_sig_all = [all_roi.is_sig];
+nSig = sum(is_sig_all);
+fprintf('Total: %d ROIs (%d sig)\n', nROIs, nSig);
+
+sessAll = [all_roi.sessIdx];
+uSess = unique(sessAll);
+cmap = turbo(numel(uSess));
+sessLookup = containers.Map(uSess, num2cell(cmap, 2));
+
+%% 3 -- Plot 1: Phase dF/F heatmap — sig ROIs only, [0,4pi]
+% Stack all sig ROIs' cycles + collect spike phases with row offsets
+sig_idx = find(is_sig_all);
+row_labels_pos = [];
+row_labels_txt = {};
+big_mat = [];
+spike_overlay = struct('row',{}, 'phi',{});  % for overlay
+for ss = 1:numel(sig_idx)
+    rr = sig_idx(ss);
+    rd = all_roi(rr);
+    valid = ~all(isnan(rd.dff_phase), 2);
+    cyc_data = rd.dff_phase(valid, :);
+    valid_idx = find(valid);
+    row_start = size(big_mat, 1) + 1;
+    big_mat = [big_mat; cyc_data; nan(2, nPhaseBins)]; %#ok<AGROW>
+    % Collect spike positions
+    for cc = 1:numel(valid_idx)
+        ci = valid_idx(cc);
+        phi = rd.spike_phase_per_cycle{ci};
+        if ~isempty(phi)
+            row_in_mat = row_start + cc - 1;
+            for sp = 1:numel(phi)
+                spike_overlay(end+1).row = row_in_mat; %#ok<SAGROW>
+                spike_overlay(end).phi = phi(sp);
+            end
+        end
+    end
+    row_labels_pos(end+1) = size(big_mat,1) - size(cyc_data,1)/2 - 1; %#ok<SAGROW>
+    row_labels_txt{end+1} = sprintf('S%dR%d', rd.sessIdx, rd.roiId); %#ok<SAGROW>
+end
+% Remove trailing gap
+if ~isempty(big_mat)
+    big_mat = big_mat(1:end-2, :);
+end
+
+% Duplicate to [0, 4pi]
+big_mat_dup = [big_mat, big_mat];
+phase_full = [phase_1cyc, phase_1cyc + 2*pi];
+
+cHigh = prctile(big_mat_dup(:), prcLim(2));
+
+figure('Color','w', 'Name', 'Phase dF/F heatmap — sig ROIs [0,4pi]');
+ax1 = axes; hold(ax1, 'on');
+imagesc(ax1, phase_full, 1:size(big_mat_dup,1), big_mat_dup);
+set(ax1, 'YDir', 'reverse');
+colormap(ax1, flipud(gray(256)));
+caxis(ax1, [0 cHigh]);
+% Overlay spike raster
+for sp = 1:numel(spike_overlay)
+    r = spike_overlay(sp).row;
+    p = spike_overlay(sp).phi;
+    % Original + duplicate
+    plot(ax1, [p p], [r-0.4 r+0.4], 'b', 'LineWidth', 3);
+    plot(ax1, [p+2*pi p+2*pi], [r-0.4 r+0.4], 'b', 'LineWidth', 3);
+end
+xline(ax1, 2*pi, 'k--', 'LineWidth', 0.8);
+xlim(ax1, [0, 4*pi]);
+ylim(ax1, [0.5, size(big_mat_dup,1)+0.5]);
+set(ax1, 'XTick', [0 pi 2*pi 3*pi 4*pi], ...
+    'XTickLabel', {'0','\pi','2\pi','3\pi','4\pi'});
+set(ax1, 'YTick', row_labels_pos, 'YTickLabel', row_labels_txt, 'FontSize', 5);
+xlabel(ax1, 'Phase'); ylabel(ax1, 'ROI');
+title(ax1, sprintf('Phase dF/F heatmap — %d sig ROIs', nSig));
+cb = colorbar(ax1); ylabel(cb, 'dF/F');
+box(ax1, 'on');
+hold(ax1, 'off');
+
+%% 4 -- Plot 2: Coherence polar (clockwise, breath waveform)
+figure('Color','w', 'Name', 'Coherence polar (clockwise)');
+ax2 = polaraxes; hold(ax2, 'on');
+
+% Mean breathing waveform as polar curve
+mean_breath = mean(all_breath_cycles, 1, 'omitnan');
+breath_norm = (mean_breath - min(mean_breath)) / (max(mean_breath) - min(mean_breath) + eps);
+polarplot(ax2, [phase_1cyc, 2*pi], [breath_norm, breath_norm(1)], 'k-', 'LineWidth', 1.5);
+
+% ROI dots
+for rr = 1:nROIs
+    if all_roi(rr).is_sig, c_r = sessLookup(all_roi(rr).sessIdx);
+    else,                   c_r = [0 0 0]; end
+    polarplot(ax2, all_roi(rr).th_k, all_roi(rr).r_k, 'o', ...
+        'MarkerFaceColor', c_r, 'MarkerEdgeColor', 'k', 'MarkerSize', 5);
+end
+
+ax2.RLim              = [0 1];
+ax2.ThetaZeroLocation = 'top';
+ax2.ThetaDir          = 'clockwise';
+ax2.FontSize          = 8;
+title(ax2, sprintf('Coherence (%d/%d sig)', nSig, nROIs));
+hold(ax2, 'off');
+
+%% 5 -- Plot 3: Spike phase probability histogram
+% Pool all spike phases from ALL spiking ROIs (not just sig)
+all_spike_ph = [];
+nTotalCycles = 0;
+for rr = 1:nROIs
+    spc = all_roi(rr).spike_phase_per_cycle;
+    nTotalCycles = nTotalCycles + numel(spc);
+    for cc = 1:numel(spc)
+        if ~isempty(spc{cc})
+            all_spike_ph = [all_spike_ph; spc{cc}(:)]; %#ok<AGROW>
+        end
+    end
+end
+n_spk = numel(all_spike_ph);
+
+% Histogram on 1 cycle [0, 2pi], normalized to P(spike) per cycle per bin
+nBins1 = 12;
+edges_1cyc = linspace(0, 2*pi, nBins1 + 1);
+ctrs_1cyc  = (edges_1cyc(1:end-1) + edges_1cyc(2:end)) / 2;
+counts_1cyc = histcounts(all_spike_ph, edges_1cyc);
+prob_1cyc   = counts_1cyc / nTotalCycles;   % P(spike) per bin per cycle
+
+% Permutation test: shuffle phases uniformly, 1000 iterations
+nPerm = 1000;
+shuf_prob = zeros(nPerm, nBins1);
+for pp = 1:nPerm
+    ph_shuf = rand(n_spk, 1) * 2 * pi;
+    shuf_prob(pp, :) = histcounts(ph_shuf, edges_1cyc) / nTotalCycles;
+end
+ci_lo = prctile(shuf_prob, 2.5,  1);
+ci_hi = prctile(shuf_prob, 97.5, 1);
+
+% p-value: fraction of shuffles where max bin prob >= observed max bin prob
+obs_max = max(prob_1cyc);
+perm_max = max(shuf_prob, [], 2);
+p_perm = mean(perm_max >= obs_max);
+if p_perm < 0.001
+    p_str = sprintf('p<0.001 (n=%d)', n_spk);
+else
+    p_str = sprintf('p=%.3f (n=%d)', p_perm, n_spk);
+end
+
+% Cosine fit on 1-cycle probability
+mu_fit = angle(mean(exp(1i * all_spike_ph)));
+a_fit  = mean(prob_1cyc);
+b_fit  = 2 * mean(prob_1cyc .* cos(ctrs_1cyc - mu_fit));
+
+% Duplicate everything to [0, 4pi]
+ctrs_dup  = [ctrs_1cyc, ctrs_1cyc + 2*pi];
+prob_dup  = [prob_1cyc, prob_1cyc];
+ci_lo_dup = [ci_lo, ci_lo];
+ci_hi_dup = [ci_hi, ci_hi];
+
+figure('Color','w', 'Name', 'Spike phase probability');
+ax3 = axes; hold(ax3, 'on');
+
+% Shuffle 95% CI band (padded to fill [0, 4pi])
+ci_x  = [0, ctrs_dup, 4*pi];
+ci_lo_pad = [ci_lo_dup(1), ci_lo_dup, ci_lo_dup(end)];
+ci_hi_pad = [ci_hi_dup(1), ci_hi_dup, ci_hi_dup(end)];
+fill(ax3, [ci_x, fliplr(ci_x)], [ci_lo_pad, fliplr(ci_hi_pad)], ...
+    [0.8 0.8 0.8], 'EdgeColor', 'none', 'FaceAlpha', 0.5);
+
+% Probability bars
+bar(ax3, ctrs_dup, prob_dup, 1, 'FaceColor', [0.3 0.3 0.8], ...
+    'FaceAlpha', 0.7, 'EdgeColor', 'none');
+
+% Cosine fit extended to [0, 4pi]
+x_fit = linspace(0, 4*pi, 500);
+y_fit = a_fit + b_fit * cos(x_fit - mu_fit);
+plot(ax3, x_fit, y_fit, 'r-', 'LineWidth', 2);
+
+xline(ax3, 2*pi, 'k--', 'LineWidth', 1);
+xlim(ax3, [0, 4*pi]);
+ylim([0, 0.1]);
+set(ax3, 'XTick', [0 pi 2*pi 3*pi 4*pi], ...
+    'XTickLabel', {'0','\pi','2\pi','3\pi','4\pi'});
+xlabel(ax3, 'Phase (rad)');
+ylabel(ax3, 'P(spike) per cycle');
+title(ax3, sprintf('Spike phase probability — %s', p_str));
+box(ax3, 'on');
+hold(ax3, 'off');
+
+%% 6 -- Plot 4: Phase PDF — observed vs spike-conditioned
+figure('Color','w', 'Name', 'Phase PDF: observed vs spike');
+ax4 = axes; hold(ax4, 'on');
+
+% Bin edges on [0, 2pi], same resolution as histogram
+nBinsPDF = 12;
+edges_pdf = linspace(0, 2*pi, nBinsPDF + 1);
+ctrs_pdf  = (edges_pdf(1:end-1) + edges_pdf(2:end)) / 2;
+bw = edges_pdf(2) - edges_pdf(1);
+
+% Observed phase PDF (all frames)
+cnt_obs = histcounts(all_frame_phase, edges_pdf);
+pdf_obs = cnt_obs / (sum(cnt_obs) * bw);
+
+% Spike-conditioned phase PDF
+cnt_spk = histcounts(all_spike_ph, edges_pdf);
+pdf_spk = cnt_spk / (sum(cnt_spk) * bw);
+
+% Duplicate to [0, 4pi]
+ctrs_pdf_dup = [ctrs_pdf, ctrs_pdf + 2*pi];
+pdf_obs_dup  = [pdf_obs, pdf_obs];
+pdf_spk_dup  = [pdf_spk, pdf_spk];
+
+% Observed (gray line)
+plot(ax4, ctrs_pdf_dup, pdf_obs_dup, '-', 'Color', [0.6 0.6 0.6], 'LineWidth', 2);
+
+% Spike-conditioned (black line)
+plot(ax4, ctrs_pdf_dup, pdf_spk_dup, 'k-', 'LineWidth', 2);
+
+xline(ax4, 2*pi, 'k--', 'LineWidth', 1);
+xlim(ax4, [0, 4*pi]);
+ylim([0 0.5]);
+set(ax4, 'XTick', [0 pi 2*pi 3*pi 4*pi], ...
+    'XTickLabel', {'0','\pi','2\pi','3\pi','4\pi'});
+xlabel(ax4, 'Phase (rad)');
+ylabel(ax4, 'Probability density');
+legend(ax4, {'Observed', 'Spike-conditioned'}, 'Location', 'best');
+title(ax4, sprintf('Phase PDF (n_{frames}=%d, n_{spikes}=%d)', ...
+    numel(all_frame_phase), n_spk));
+box(ax4, 'on');
+hold(ax4, 'off');
+
+fprintf('\nDone. 4 figures open.\n');

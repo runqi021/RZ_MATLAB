@@ -175,7 +175,7 @@ dFF_keep = dFF(:, keepIdx);
 
 %%
 g = 0.93;
-[F_keep_deconv, dFF_keep_deconv, spikes_oasis, baseline_oasis] = oasis_deconv_and_dff_AR1(F_keep, g);
+[F_keep_deconv, dFF_keep_deconv, spikes_oasis, baseline_oasis] = helper.oasis_deconv_and_dff_AR1(F_keep, g);
 
 helper.stackDFF(dFF_keep, dFF_keep_deconv);
 

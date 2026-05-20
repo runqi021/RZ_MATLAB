@@ -22,7 +22,7 @@ p = inputParser;
 addParameter(p,'FPS',30);
 addParameter(p,'Diameter',[]);             % pixels across soma
 addParameter(p,'FlowThreshold',0.4);
-addParameter(p,'CellprobThreshold',0.0);
+addParameter(p,'CellprobThreshold',-0.5);
 addParameter(p,'BatchSize',8);
 addParameter(p,'UseGPU',true);
 addParameter(p,'PythonExe', pyExe);  %'C:\Users\zhang\anaconda3\envs\cellpose-gpu\python.exe'
@@ -53,7 +53,7 @@ if isa(fr,'uint16')
     avg16 = uint16(avgIm);
     imwrite(avg16, avgPath);
 else
-    s = prctile(avgIm(:), [0.1 99.9]);
+    s = prctile(avgIm(:), [0.5 99.5]);
     avg16 = uint16( max(0, min(65535, (avgIm - s(1)) * 65535/max(1, s(2)-s(1)))) );
     imwrite(avg16, avgPath);
 end

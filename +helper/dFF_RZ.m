@@ -47,7 +47,7 @@ function out = dFF_RZ(F, varargin)
     p = inputParser;
     addParameter(p, 'FPS', 30);
     addParameter(p, 'DropFirstSec', 0);        % seconds
-    addParameter(p, 'BaselineWinSec', 20);     % seconds
+    addParameter(p, 'BaselineWinSec', 10);     % seconds
     addParameter(p, 'UseOASIS', false);
     % GCaMP8s half decay time: 310ms --> Tau = ~450ms
     addParameter(p, 'TauDecay', 0.45);         % seconds

@@ -1,11 +1,24 @@
-loadtiff("E:\RZ\data\shi\260115_homo_cal590\test\fov2_-200_L_30lp\raw\fov2_-200_L_30lp_1100nm_5x_00003.tif");
+%loadtiff("D:\RUNQI\260224_vglut2_soma_g8s\phys\processed\breathing\pFN_roi2_z0_25x_512x512_3x_2000f_00001\pFN_roi2_z0_25x_512x512_3x_2000f_00001.tif");
 
-%%
-fn = "C:\Users\Admin\Desktop\260210_chat_soma_g8s\roi1_-1050_400_z-25-115_IO_00001.tif";
+fn = "Z:\p1yao\RZ\in vivo\sert_soma_g8s_retake\sert_soma_G8s_map_1.2x_50f_col01_row01_x-751_y301_00001.tif";
 info = imfinfo(fn);
 
 info(2)   % look at first frame
 
+%%
+meta = string(info(1).Software);
+meta = replace(meta, char(8593), newline);  % just in case (unlikely)
+meta = replace(meta, "↵", newline);
+
+getNum = @(key) local_get_num(meta, key);
+getStr = @(key) local_get_str(meta, key);
+
+getStr("hMotors.motorPosition");
+
+getStr("hBeams.powers");
+
+getStr("hBeams.stackStartPower")
+getStr("hBeams.stackEndPower")
 
 %%
 parse_scanimage_power_from_info(info)

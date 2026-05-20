@@ -41,18 +41,21 @@ S.hasTif        = false;
 S.tifFile       = '';
 S.dFFraw        = [];    % copy of dFF as loaded (before optional detrend)
 S.detrend       = false; % is detrend currently applied?
+S.trimInfo      = [];    % struct with trim metadata (frame_idx, trimStart_sec, etc.)
 S.hOasisLine    = [];    % orange overlay line for OASIS deconvolved trace
 S.hRawFLine     = [];    % line handle for raw F panel
 S.showOasis     = false; % toggle: overlay OASIS dFF on trace plot
 
+
 % -- Factory defaults (restored by Reset button) --------------------------
+DEFAULTS.BaselineWinSec  = 20;
 DEFAULTS.fps        = 30;
 DEFAULTS.method     = 'Raw dFF';
 DEFAULTS.threshold  = 2.0;
 DEFAULTS.minDist    = 0.5;
 DEFAULTS.minWidth   = 0.1;
-DEFAULTS.snapWin    = 0.20;
-DEFAULTS.diameter   = 30;
+DEFAULTS.snapWin    = 0.10;
+DEFAULTS.diameter   = 40;
 DEFAULTS.zoomFactor = 4;
 DEFAULTS.prominence = 0;      % MinPeakProminence for findpeaks (0 = disabled)
 DEFAULTS.tauDecay   = 0.45;   % OASIS AR(1) decay constant (s)
@@ -76,7 +79,7 @@ ctrlPan = uipanel(rootGL, 'Title','Controls', ...
     'FontSize',12,'FontWeight','bold');
 ctrlPan.Layout.Column = 1;
 
-nCtrlRows = 37;
+nCtrlRows = 34;
 cGL = uigridlayout(ctrlPan, [nCtrlRows 2]);
 cGL.RowHeight   = repmat({'fit'}, 1, nCtrlRows);
 cGL.ColumnWidth = {'fit','1x'};
@@ -122,12 +125,6 @@ r=r+1; btnPrevROI = uibutton(cGL,'Text','<- Prev ROI','ButtonPushedFcn',@cb_prev
        btnNextROI = uibutton(cGL,'Text','Next ROI ->','ButtonPushedFcn',@cb_nextROI);
        btnNextROI.Layout.Row=r; btnNextROI.Layout.Column=2;
 
-r=r+1; h=uilabel(cGL,'Text','Jump to ROI:');
-       h.Layout.Row=r; h.Layout.Column=1;
-       spnROI = uispinner(cGL,'Value',1,'Limits',[1 1],'Step',1, ...
-           'ValueChangedFcn',@cb_jumpROI);
-       spnROI.Layout.Row=r; spnROI.Layout.Column=2;
-
 % -- Imaging Parameters ---------------------------------------------------
 r=r+1; h=uilabel(cGL,'Text','-- Parameters --','FontWeight','bold');
        h.Layout.Row=r; h.Layout.Column=[1 2];
@@ -150,27 +147,9 @@ r=r+1; h=uilabel(cGL,'Text','Zoom Factor:');
            'Limits',[1 20],'ValueChangedFcn',@(~,~) saveWorkingParams());
        efZoom.Layout.Row=r; efZoom.Layout.Column=2;
 
-r=r+1; h=uilabel(cGL,'Text','Python Exe:');
-       h.Layout.Row=r; h.Layout.Column=1;
-       efPythonExe = uieditfield(cGL,'text','Value',DEFAULTS.pythonExe, ...
-           'ValueChangedFcn',@(~,~) saveWorkingParams());
-       efPythonExe.Layout.Row=r; efPythonExe.Layout.Column=2;
-
-r=r+1; h=uilabel(cGL,'Text','Tau Decay (s):');
-       h.Layout.Row=r; h.Layout.Column=1;
-       efTauDecay = uieditfield(cGL,'numeric','Value',DEFAULTS.tauDecay, ...
-           'Limits',[0.01 10],'ValueChangedFcn',@(~,~) saveWorkingParams());
-       efTauDecay.Layout.Row=r; efTauDecay.Layout.Column=2;
-
 % -- Spike Detection -------------------------------------------------------
 r=r+1; h=uilabel(cGL,'Text','-- Spike Detection --','FontWeight','bold');
        h.Layout.Row=r; h.Layout.Column=[1 2];
-
-r=r+1; h=uilabel(cGL,'Text','Detect on:');
-       h.Layout.Row=r; h.Layout.Column=1;
-       ddMethod = uidropdown(cGL,'Items',{'Raw dFF','OASIS deconv'},'Value','Raw dFF', ...
-           'ValueChangedFcn',@(~,~) saveWorkingParams());
-       ddMethod.Layout.Row=r; ddMethod.Layout.Column=2;
 
 r=r+1; h=uilabel(cGL,'Text','Threshold (dF/F):');
        h.Layout.Row=r; h.Layout.Column=1;
@@ -196,30 +175,32 @@ r=r+1; h=uilabel(cGL,'Text','Min Width (s):');
            'Limits',[0 Inf],'ValueChangedFcn',@(~,~) saveWorkingParams());
        efMinWidth.Layout.Row=r; efMinWidth.Layout.Column=2;
 
-r=r+1; h=uilabel(cGL,'Text','Snap window (s):');
-       h.Layout.Row=r; h.Layout.Column=1;
-       efSnap = uieditfield(cGL,'numeric','Value',DEFAULTS.snapWin, ...
-           'Limits',[0 10],'ValueChangedFcn',@(~,~) saveWorkingParams());
-       efSnap.Layout.Row=r; efSnap.Layout.Column=2;
-
 r=r+1; btnDetect = uibutton(cGL,'Text','Detect Spikes (Current ROI)', ...
            'ButtonPushedFcn',@cb_detect, ...
            'BackgroundColor',[0.18 0.65 0.30],'FontColor','white');
        btnDetect.Layout.Row=r; btnDetect.Layout.Column=[1 2];
 
-r=r+1; btnDetectAll = uibutton(cGL,'Text','Detect Spikes (All ROIs)', ...
-           'ButtonPushedFcn',@cb_detectAll, ...
-           'BackgroundColor',[0.10 0.50 0.22],'FontColor','white');
-       btnDetectAll.Layout.Row=r; btnDetectAll.Layout.Column=[1 2];
+r=r+1; h=uilabel(cGL,'Text','Trim Start (s):');
+       h.Layout.Row=r; h.Layout.Column=1;
+       efTrimStart = uieditfield(cGL,'numeric','Value',0,'Limits',[0 Inf]);
+       efTrimStart.Layout.Row=r; efTrimStart.Layout.Column=2;
+       efTrimStart.ValueChangedFcn = @(~,~) refreshRawF();
 
-r=r+1; btnRunOasis = uibutton(cGL,'Text','Run OASIS', ...
-           'ButtonPushedFcn',@cb_runOasis, ...
-           'BackgroundColor',[0.55 0.30 0.05],'FontColor','white');
-       btnRunOasis.Layout.Row=r; btnRunOasis.Layout.Column=1;
-       btnOasisOverlay = uibutton(cGL,'Text','Show: OFF', ...
-           'ButtonPushedFcn',@cb_toggleOasisOverlay, ...
-           'BackgroundColor',[0.40 0.40 0.40],'FontColor','white');
-       btnOasisOverlay.Layout.Row=r; btnOasisOverlay.Layout.Column=2;
+r=r+1; h=uilabel(cGL,'Text','Trim End (s):');
+       h.Layout.Row=r; h.Layout.Column=1;
+       efTrimEnd = uieditfield(cGL,'numeric','Value',Inf,'Limits',[0 Inf]);
+       efTrimEnd.Layout.Row=r; efTrimEnd.Layout.Column=2;
+       efTrimEnd.ValueChangedFcn = @(~,~) refreshRawF();
+
+r=r+1; btnApplyTrim = uibutton(cGL,'Text','Apply Trim (crop data)', ...
+           'ButtonPushedFcn',@cb_applyTrim, ...
+           'BackgroundColor',[0.85 0.55 0.05],'FontColor','white');
+       btnApplyTrim.Layout.Row=r; btnApplyTrim.Layout.Column=[1 2];
+
+r=r+1; btnPlayMovie = uibutton(cGL,'Text','Play ROI Movie', ...
+           'ButtonPushedFcn',@cb_playMovie, ...
+           'BackgroundColor',[0.15 0.45 0.70],'FontColor','white');
+       btnPlayMovie.Layout.Row=r; btnPlayMovie.Layout.Column=[1 2];
 
 r=r+1; btnDetrend = uibutton(cGL,'Text','Detrend: OFF', ...
            'ButtonPushedFcn',@cb_toggleDetrend, ...
@@ -291,14 +272,13 @@ rightGL.RowHeight     = {'0.22x', '0.42x', '0.36x'};
 rightGL.Padding       = [0 0 0 0];
 rightGL.RowSpacing    = 6;
 
-% Row 1: Avg Projection (directly in rightGL)
+% Row 1: Avg Projection
 axSum = uiaxes(rightGL);
 axSum.Layout.Row             = 1;
 axSum.Title.String           = 'Avg Projection';
 axSum.Title.Interpreter      = 'none';
 axSum.XLabel.String          = '';
 axSum.YLabel.String          = '';
-colormap(axSum, 'gray');
 axis(axSum, 'image');
 
 % Row 2: dF/F trace with spikes
@@ -346,7 +326,7 @@ fig.CloseRequestFcn = @cb_close;
 
         sessions = scanForDFFSessions(master);
         if isempty(sessions)
-            uialert(fig,'No *_dFF.mat files found in any subfolder.','No Sessions');
+            uialert(fig,'No *_dFF.mat or *_cpSAM_output.mat files found in any subfolder.','No Sessions');
             return;
         end
         S.sessionList = sessions;
@@ -383,24 +363,73 @@ fig.CloseRequestFcn = @cb_close;
         S.sumImg     = [];
         S.dFFout     = [];
         S.showOasis  = false;
-        btnOasisOverlay.Text = 'Show: OFF';
-        btnOasisOverlay.BackgroundColor = [0.40 0.40 0.40];
 
         % Show current folder name
         [~, folderName] = fileparts(S.folderPath);
         lblCurrentFolder.Text = folderName;
 
-        % Load dFF data
-        try
-            loaded = load(S.dffFile);
-        catch ME
-            uialert(fig, ME.message, 'Load Error'); return;
-        end
+        % Load dFF data — or compute from SAM F if *_dFF.mat is missing
+        if ~isempty(S.dffFile) && isfile(S.dffFile)
+            try
+                loaded = load(S.dffFile);
+            catch ME
+                uialert(fig, ME.message, 'Load Error'); return;
+            end
 
-        if isfield(loaded,'dFF')
-            S.dFF = loaded.dFF;
+            if isfield(loaded,'dFF')
+                S.dFF = loaded.dFF;
+            else
+                uialert(fig,'No dFF variable in file.','Load Error'); return;
+            end
+        elseif S.hasMask
+            % No *_dFF.mat but SAM exists — compute dFF from F
+            try
+                samData = load(S.samFile);
+            catch ME
+                uialert(fig, ME.message, 'Load SAM Error'); return;
+            end
+            if ~isfield(samData, 'F')
+                uialert(fig, 'SAM file has no F variable.', 'Load Error'); return;
+            end
+
+            fps_now    = efFps.Value;
+            tossFrames = 30;               % pipeline default: TossFrames = 30
+            F_roi_raw  = double(samData.F);
+            F_roi      = F_roi_raw;
+            if tossFrames > 0 && size(F_roi,1) > tossFrames
+                F_roi(1:tossFrames,:) = [];
+            end
+
+            fprintf('Computing dFF from SAM F (%d frames, %d ROIs, toss=%d)...\n', ...
+                size(F_roi,1), size(F_roi,2), tossFrames);
+            dFFout_comp = dFF_RZ_dispatch(F_roi);
+            S.dFF = dFFout_comp.dFF;
+
+            % Build params struct matching Batch_BG_MC_SAM save format
+            params = struct();
+            params.sam_mat    = S.samFile;
+            params.FPS        = fps_now;
+            params.tossFrames = tossFrames;
+
+            % Derive output filename from SAM filename stem
+            [~, samStem] = fileparts(S.samFile);
+            samStem = regexprep(samStem, '_cpSAM_output$', '');
+            outDffMat = fullfile(S.folderPath, [samStem '_dFF.mat']);
+
+            dFF     = S.dFF;          %#ok<NASGU>  % for save
+            dFFout  = dFFout_comp;     %#ok<NASGU>
+            save(outDffMat, 'dFF','dFFout','F_roi_raw','F_roi','params', '-v7.3');
+            fprintf('Saved computed dFF: %s\n', outDffMat);
+
+            % Update session entry so subsequent loads find the file
+            S.dffFile = outDffMat;
+            S.sessionList{S.sessionIdx}.dffFile = outDffMat;
+
+            % Set loaded struct for downstream use
+            loaded = struct('dFF', S.dFF, 'dFFout', dFFout_comp, 'params', params);
         else
-            uialert(fig,'No dFF variable in file.','Load Error'); return;
+            uialert(fig, 'No *_dFF.mat and no *_cpSAM_output.mat found.', 'Load Error');
+            return;
         end
 
         [T, N] = size(S.dFF);
@@ -461,8 +490,18 @@ fig.CloseRequestFcn = @cb_close;
             end
         end
 
-        % Mean projection from TIF (sample 50 frames, compute average)
-        if S.hasTif
+        % Prefer the cellpose input AVG image if available
+        avgHits = dir(fullfile(S.folderPath, '*_AVG_for_CP.tif'));
+        if ~isempty(avgHits)
+            try
+                S.sumImg  = double(imread(fullfile(S.folderPath, avgHits(1).name)));
+                S.meanImg = S.sumImg;
+            catch
+            end
+        end
+
+        % Fallback: mean projection from TIF (sample 50 frames, compute average)
+        if isempty(S.sumImg) && S.hasTif
             try
                 tifInfo = imfinfo(S.tifFile);
                 nTotal  = numel(tifInfo);
@@ -499,9 +538,12 @@ fig.CloseRequestFcn = @cb_close;
         btnDetrend.Text = 'Detrend: OFF';
         btnDetrend.BackgroundColor = [0.25 0.25 0.55];
 
-        % Reset OASIS button appearance
-        btnRunOasis.Text            = 'Run OASIS';
-        btnRunOasis.BackgroundColor = [0.55 0.30 0.05];
+        % Reset trim per FOV
+        efTrimStart.Value = 0;
+        efTrimEnd.Value   = Inf;
+        S.trimInfo = [];
+
+        % Reset OASIS state
 
         % Load previously saved OASIS results if available
         oasisFile = fullfile(S.folderPath, 'oasis.mat');
@@ -514,8 +556,7 @@ fig.CloseRequestFcn = @cb_close;
                     S.dFFout.spikes_oasis     = oas.spikes_oasis;
                     S.dFFout.baseline_oasis   = oas.baseline_oasis;
                     if isfield(oas,'g_AR1'), S.dFFout.g_AR1 = oas.g_AR1; end
-                    btnRunOasis.Text            = 'OASIS: Loaded';
-                    btnRunOasis.BackgroundColor = [0.10 0.60 0.45];
+                    % OASIS data loaded from file
                 end
             catch
             end
@@ -526,14 +567,13 @@ fig.CloseRequestFcn = @cb_close;
         S.curROI = 1;
 
         % Update ROI spinner limits
-        spnROI.Limits = [1 max(1, N)];
-        spnROI.Value  = 1;
+        % ROI range: 1..N
 
         % Check for previously saved results
         matFile = fullfile(S.folderPath, 'ca_spike_data.mat');
         if isfile(matFile)
             try
-                saved = load(matFile, 'roi_spikes', 'spike_params');
+                saved = load(matFile, 'roi_spikes', 'spike_params', 'trim_info');
                 if isfield(saved,'roi_spikes')
                     rs = saved.roi_spikes;
                     for ii = 1:min(numel(rs), N)
@@ -548,22 +588,67 @@ fig.CloseRequestFcn = @cb_close;
                     if isfield(sp,'threshold'),   efThresh.Value    = sp.threshold;   end
                     if isfield(sp,'minDist'),      efMinDist.Value   = sp.minDist;     end
                     if isfield(sp,'minWidth'),     efMinWidth.Value  = sp.minWidth;    end
-                    if isfield(sp,'snapWin'),      efSnap.Value      = sp.snapWin;     end
-                    if isfield(sp,'method')
-                        mval = sp.method;
-                        if strcmp(mval,'Threshold'), mval = 'Raw dFF'; end
-                        if strcmp(mval,'OASIS'),     mval = 'OASIS deconv'; end
-                        if ismember(mval, ddMethod.Items), ddMethod.Value = mval; end
-                    end
+                    % method, snapWin, tauDecay, pythonExe: use hardcoded defaults
                     if isfield(sp,'diameter'),     efDiameter.Value  = sp.diameter;    end
                     if isfield(sp,'zoomFactor'),   efZoom.Value      = sp.zoomFactor;  end
                     if isfield(sp,'prominence'),   efProminence.Value = sp.prominence; end
-                    if isfield(sp,'tauDecay'),     efTauDecay.Value  = sp.tauDecay;    end
-                    if isfield(sp,'pythonExe'),    efPythonExe.Value = sp.pythonExe;   end
+                    if isfield(sp,'tauDecay'),     DEFAULTS.tauDecay  = sp.tauDecay;    end
+                    if isfield(sp,'pythonExe'),    DEFAULTS.pythonExe = sp.pythonExe;   end
+                end
+                % Re-apply saved trim to freshly loaded full-length data
+                if isfield(saved,'trim_info') && isstruct(saved.trim_info) ...
+                        && isfield(saved.trim_info,'frame_idx')
+                    ti = saved.trim_info;
+                    idx = ti.frame_idx(:);
+                    idx = idx(idx >= 1 & idx <= size(S.dFF,1));
+                    if ~isempty(idx)
+                        S.dFF    = S.dFF(idx, :);
+                        S.dFFraw = S.dFF;
+                        S.t_img  = (0:size(S.dFF,1)-1)' / S.fps;
+                        if ~isempty(S.F_raw) && size(S.F_raw,1) >= max(idx)
+                            S.F_raw = S.F_raw(idx, :);
+                        end
+                        if ~isempty(S.dFFout) && isstruct(S.dFFout)
+                            oF = {'dFF_oasis_deconv','F_oasis_deconv', ...
+                                  'spikes_oasis','baseline_oasis','F_dff'};
+                            for ff = 1:numel(oF)
+                                fn = oF{ff};
+                                if isfield(S.dFFout,fn) && ~isempty(S.dFFout.(fn)) ...
+                                        && size(S.dFFout.(fn),1) >= max(idx)
+                                    S.dFFout.(fn) = S.dFFout.(fn)(idx, :);
+                                end
+                            end
+                        end
+                        S.trimInfo = ti;
+                    end
                 end
                 lblCurrentFolder.Text = [folderName '  (saved)'];
             catch
                 % Corrupted mat -- fall through
+            end
+        end
+
+        % Auto-detect FPS and zoom from TIF metadata / _meta.mat
+        % (runs AFTER saved params restore so detected values win)
+        try
+            [det_fps, det_meta] = detect_session_fps(S.folderPath, S.fps);
+            S.fps = det_fps;  efFps.Value = det_fps;
+            if isfield(det_meta,'zoomFactor') && ~isempty(det_meta.zoomFactor) ...
+                    && isfinite(det_meta.zoomFactor) && det_meta.zoomFactor > 0
+                efZoom.Value = det_meta.zoomFactor;
+            end
+        catch
+        end
+
+        % Fallback: parse zoom from folder name (e.g. '12x' in '...z0_12x_00001')
+        if efZoom.Value == DEFAULTS.zoomFactor
+            [~, fName] = fileparts(S.folderPath);
+            tok = regexp(fName, '(\d+)x', 'tokens', 'once');
+            if ~isempty(tok)
+                zf = str2double(tok{1});
+                if isfinite(zf) && zf >= 1 && zf <= 50
+                    efZoom.Value = zf;
+                end
             end
         end
 
@@ -584,23 +669,12 @@ fig.CloseRequestFcn = @cb_close;
     function cb_prevROI(~,~)
         if S.curROI <= 1, return; end
         S.curROI = S.curROI - 1;
-        spnROI.Value = S.curROI;
         refreshAll();
     end
 
     function cb_nextROI(~,~)
         if S.curROI >= S.nROI, return; end
         S.curROI = S.curROI + 1;
-        spnROI.Value = S.curROI;
-        refreshAll();
-    end
-
-    function cb_jumpROI(~,~)
-        newVal = round(spnROI.Value);
-        if newVal < 1, newVal = 1; end
-        if newVal > S.nROI, newVal = S.nROI; end
-        S.curROI = newVal;
-        spnROI.Value = newVal;
         refreshAll();
     end
 
@@ -633,29 +707,19 @@ fig.CloseRequestFcn = @cb_close;
         minDist = efMinDist.Value;
         minW    = efMinWidth.Value;
         prom    = efProminence.Value;
-        detOn   = ddMethod.Value;   % 'Raw dFF' or 'OASIS deconv'
-
-        switch detOn
-            case 'OASIS deconv'
-                if ~isempty(S.dFFout) && isfield(S.dFFout,'dFF_oasis_deconv') ...
-                        && ~isempty(S.dFFout.dFF_oasis_deconv) ...
-                        && size(S.dFFout.dFF_oasis_deconv,2) >= roiIdx
-                    trace_det = S.dFFout.dFF_oasis_deconv(:, roiIdx);
-                elseif ~isempty(S.dFFout) && isfield(S.dFFout,'spikes_oasis') ...
-                        && ~isempty(S.dFFout.spikes_oasis) ...
-                        && size(S.dFFout.spikes_oasis,2) >= roiIdx
-                    trace_det = S.dFFout.spikes_oasis(:, roiIdx);
-                else
-                    uialert(fig, ...
-                        'No OASIS data found. Press "Run OASIS Deconv" first.', ...
-                        'OASIS Not Run');
-                    return;
-                end
-            otherwise   % 'Raw dFF'
-                trace_det = S.dFF(:, roiIdx);
-        end
+        trace_det = S.dFF(:, roiIdx);
 
         spk = find_spikes_threshold(trace_det, fps, thr, minDist, minW, prom);
+
+        % Filter spikes to trim window
+        tStart = efTrimStart.Value;
+        tEnd   = efTrimEnd.Value;
+        if ~isempty(spk) && ~isempty(S.t_img)
+            spk_t = S.t_img(min(spk, numel(S.t_img)));
+            keep = spk_t >= tStart & spk_t <= tEnd;
+            spk = spk(keep);
+        end
+
         S.spikes{roiIdx} = spk(:);
     end
 
@@ -683,7 +747,7 @@ fig.CloseRequestFcn = @cb_close;
             return;
         end
 
-        pyExe = efPythonExe.Value;
+        pyExe = DEFAULTS.pythonExe;
         if isempty(pyExe), pyExe = detectPyExe(); end
         if isempty(pyExe) || ~isfile(pyExe)
             uialert(fig, ...
@@ -692,11 +756,9 @@ fig.CloseRequestFcn = @cb_close;
             return;
         end
 
-        tauDecay = efTauDecay.Value;
+        tauDecay = DEFAULTS.tauDecay;
         %g = round(exp(-(1/fps)/tauDecay), 2);
         g = 0.93;
-        btnRunOasis.Text   = 'Running OASIS...';
-        btnRunOasis.Enable = 'off';
         drawnow;
         try
             [F_oasis, dFF_oasis, spikes_oasis, baseline_oasis] = ...
@@ -721,21 +783,9 @@ fig.CloseRequestFcn = @cb_close;
             save(oasisPath, '-struct', 'oasis_save', '-v7.3');
             fprintf('OASIS results saved: %s\n', oasisPath);
 
-            % Auto-enable overlay
             S.showOasis = true;
-            btnOasisOverlay.Text = 'Show: ON';
-            btnOasisOverlay.BackgroundColor = [1.0 0.55 0.10];
-
-            btnRunOasis.Text            = 'OASIS: Done';
-            btnRunOasis.BackgroundColor = [0.10 0.60 0.45];
-            btnRunOasis.Enable          = 'on';
-            drawnow;
-
             refreshTrace();
         catch ME
-            btnRunOasis.Text            = 'Run OASIS';
-            btnRunOasis.BackgroundColor = [0.55 0.30 0.05];
-            btnRunOasis.Enable          = 'on';
             uialert(fig, sprintf('OASIS failed:\n%s', ME.message), 'OASIS Error');
         end
     end
@@ -746,13 +796,6 @@ fig.CloseRequestFcn = @cb_close;
             uialert(fig,'Run OASIS first.','No OASIS Data'); return;
         end
         S.showOasis = ~S.showOasis;
-        if S.showOasis
-            btnOasisOverlay.Text = 'Show: ON';
-            btnOasisOverlay.BackgroundColor = [1.0 0.55 0.10];
-        else
-            btnOasisOverlay.Text = 'Show: OFF';
-            btnOasisOverlay.BackgroundColor = [0.40 0.40 0.40];
-        end
         refreshTrace();
     end
 
@@ -772,7 +815,7 @@ fig.CloseRequestFcn = @cb_close;
         switch S.editMode
             case 'add'
                 % Snap to local maximum within snap window
-                snapFr = max(1, round(efSnap.Value * efFps.Value));
+                snapFr = max(1, round(DEFAULTS.snapWin * efFps.Value));
                 lo = max(1, nearIdx - snapFr);
                 hi = min(length(trace), nearIdx + snapFr);
                 [~, imax] = max(trace(lo:hi));
@@ -906,34 +949,122 @@ fig.CloseRequestFcn = @cb_close;
 
     function applyWorkingParams(p)
         efFps.Value      = p.fps;
-        mval = p.method;
-        if strcmp(mval,'Threshold'), mval = 'Raw dFF'; end
-        if strcmp(mval,'OASIS'),     mval = 'OASIS deconv'; end
-        if ismember(mval, ddMethod.Items), ddMethod.Value = mval; end
         efThresh.Value   = p.threshold;
         efMinDist.Value  = p.minDist;
         efMinWidth.Value = p.minWidth;
-        efSnap.Value     = p.snapWin;
         efDiameter.Value = p.diameter;
         efZoom.Value     = p.zoomFactor;
         if isfield(p,'prominence'),  efProminence.Value = p.prominence;  end
-        if isfield(p,'tauDecay'),    efTauDecay.Value   = p.tauDecay;    end
-        if isfield(p,'pythonExe'),   efPythonExe.Value  = p.pythonExe;   end
     end
 
     function saveWorkingParams()
         wp.fps        = efFps.Value;
-        wp.method     = ddMethod.Value;
+        wp.method     = 'Raw dFF';
         wp.threshold  = efThresh.Value;
         wp.minDist    = efMinDist.Value;
         wp.minWidth   = efMinWidth.Value;
-        wp.snapWin    = efSnap.Value;
+        wp.snapWin    = DEFAULTS.snapWin;
         wp.diameter   = efDiameter.Value;
         wp.zoomFactor = efZoom.Value;
         wp.prominence = efProminence.Value;
-        wp.tauDecay   = efTauDecay.Value;
-        wp.pythonExe  = efPythonExe.Value;
+        wp.tauDecay   = DEFAULTS.tauDecay;
+        wp.pythonExe  = DEFAULTS.pythonExe;
         setpref('CalciumSpikeGUI','workingParams',wp);
+    end
+
+    % -- Apply Trim (hard crop) --------------------------------------------
+    function cb_applyTrim(~,~)
+        if isempty(S.dFF) || S.nROI == 0
+            uialert(fig,'Load data first.','No Data'); return;
+        end
+
+        tStart = efTrimStart.Value;
+        tEnd   = efTrimEnd.Value;
+        T_orig = size(S.dFF, 1);
+
+        % If no meaningful trim, do nothing
+        if tStart <= S.t_img(1) && (isinf(tEnd) || tEnd >= S.t_img(end))
+            uialert(fig,'Trim range covers the entire recording. Nothing to trim.','No Trim');
+            return;
+        end
+
+        % Compute frame indices to keep
+        keepMask = S.t_img >= tStart;
+        if isfinite(tEnd)
+            keepMask = keepMask & S.t_img <= tEnd;
+        end
+        keepIdx = find(keepMask);
+
+        if isempty(keepIdx)
+            uialert(fig,'Trim range is empty. No frames to keep.','Error'); return;
+        end
+
+        T_new = numel(keepIdx);
+
+        % Track original frame indices (cumulative if trim already applied)
+        if ~isempty(S.trimInfo) && isfield(S.trimInfo,'frame_idx')
+            origIdx = S.trimInfo.frame_idx(keepIdx);
+        else
+            origIdx = keepIdx;
+        end
+
+        % Build old→new index map for spike re-indexing
+        oldToNew = zeros(T_orig, 1);
+        oldToNew(keepIdx) = 1:T_new;
+
+        % Crop dFF and dFFraw
+        S.dFF    = S.dFF(keepIdx, :);
+        S.dFFraw = S.dFFraw(keepIdx, :);
+
+        % Crop F_raw
+        if ~isempty(S.F_raw) && size(S.F_raw,1) >= max(keepIdx)
+            S.F_raw = S.F_raw(keepIdx, :);
+        end
+
+        % Crop OASIS / dFFout subfields
+        if ~isempty(S.dFFout) && isstruct(S.dFFout)
+            oFields = {'dFF_oasis_deconv','F_oasis_deconv','spikes_oasis', ...
+                       'baseline_oasis','F_dff'};
+            for ff = 1:numel(oFields)
+                fn = oFields{ff};
+                if isfield(S.dFFout, fn) && ~isempty(S.dFFout.(fn)) ...
+                        && size(S.dFFout.(fn),1) >= max(keepIdx)
+                    S.dFFout.(fn) = S.dFFout.(fn)(keepIdx, :);
+                end
+            end
+        end
+
+        % Reset time vector to start from 0
+        S.t_img = (0:T_new-1)' / S.fps;
+
+        % Re-index all spike indices
+        for ii = 1:S.nROI
+            spk = S.spikes{ii};
+            if isempty(spk), continue; end
+            spk = spk(spk >= 1 & spk <= T_orig);
+            newSpk = oldToNew(spk);
+            S.spikes{ii} = newSpk(newSpk > 0);
+        end
+
+        % Store trim metadata
+        S.trimInfo = struct();
+        S.trimInfo.frame_idx      = origIdx(:);
+        S.trimInfo.trimStart_sec  = tStart;
+        S.trimInfo.trimEnd_sec    = tEnd;
+        S.trimInfo.orig_T         = T_orig;
+        S.trimInfo.applied_at     = datestr(now); %#ok<TNOW1,DATST>
+
+        % Reset trim fields (trim has been applied)
+        efTrimStart.Value = 0;
+        efTrimEnd.Value   = Inf;
+
+        % Refresh display
+        refreshTrace();
+        refreshRawF();
+
+        uialert(fig, sprintf('Trim applied: kept frames %d–%d (%d of %d).\nNew T = %d frames (%.1f s).', ...
+            keepIdx(1), keepIdx(end), T_new, T_orig, T_new, T_new/S.fps), ...
+            'Trim Applied', 'Icon','success');
     end
 
     % -- Save --------------------------------------------------------------
@@ -967,41 +1098,42 @@ fig.CloseRequestFcn = @cb_close;
                 rs.spike_train = train;
                 rs.n_spikes    = numel(spk);
             end
-            rs.ifSpike = rs.n_spikes > 0;   % flag: skip in future analysis if false
+            rs.ifSpike = rs.n_spikes > 0;
             roi_spikes(ii) = rs; %#ok<AGROW>
         end
 
-        % Convenience logical vector: ifSpike(ii) = true if ROI ii has any spikes
         ifSpike = logical([roi_spikes.n_spikes] > 0);
 
         % Build spike_params struct
         spike_params = struct();
-        spike_params.method     = ddMethod.Value;
+        spike_params.method     = 'Raw dFF';
         spike_params.threshold  = efThresh.Value;
         spike_params.minDist    = efMinDist.Value;
         spike_params.minWidth   = efMinWidth.Value;
-        spike_params.snapWin    = efSnap.Value;
+        spike_params.snapWin    = DEFAULTS.snapWin;
         spike_params.fps        = fps;
         spike_params.diameter   = efDiameter.Value;
         spike_params.zoomFactor = efZoom.Value;
         spike_params.prominence = efProminence.Value;
-        spike_params.tauDecay   = efTauDecay.Value;
+        spike_params.tauDecay   = DEFAULTS.tauDecay;
         spike_params.dff_file   = S.dffFile;
         spike_params.saved_at   = datestr(now); %#ok<TNOW1,DATST>
         spike_params.oasis_run     = ~isempty(S.dFFout) && isfield(S.dFFout,'spikes_oasis') ...
                                       && ~isempty(S.dFFout.spikes_oasis);
-        spike_params.oasis_tauDecay = efTauDecay.Value;
+        spike_params.oasis_tauDecay = DEFAULTS.tauDecay;
         spike_params.oasis_g        = '';
         if ~isempty(S.dFFout) && isfield(S.dFFout,'g_AR1')
             spike_params.oasis_g = S.dFFout.g_AR1;
         end
-        spike_params.detect_on = ddMethod.Value;
+        spike_params.detect_on  = 'Raw dFF';
+        spike_params.trimStart  = efTrimStart.Value;
+        spike_params.trimEnd    = efTrimEnd.Value;
 
-        % Save per-session file
+        % Include trim info (empty if no trim applied)
+        trim_info = S.trimInfo; %#ok<NASGU>
+
         outFile = fullfile(S.folderPath, 'ca_spike_data.mat');
-        save(outFile, 'roi_spikes', 'spike_params', 'ifSpike', '-v7.3');
-
-        % Update master file
+        save(outFile, 'roi_spikes', 'spike_params', 'ifSpike', 'trim_info', '-v7.3');
         updateMasterFile(roi_spikes, spike_params);
 
         [~, folderName] = fileparts(S.folderPath);
@@ -1021,6 +1153,7 @@ fig.CloseRequestFcn = @cb_close;
         entry.n_rois       = S.nROI;
         entry.roi_spikes   = roi_spikes;
         entry.spike_params = spike_params;
+        entry.trim_info    = S.trimInfo;
 
         % Load or initialise master struct
         master = struct();
@@ -1035,6 +1168,11 @@ fig.CloseRequestFcn = @cb_close;
             catch
                 % keep fresh master on corruption
             end
+        end
+
+        % Backfill trim_info on old sessions that lack the field
+        if ~isempty(master.sessions) && ~isfield(master.sessions, 'trim_info')
+            [master.sessions.trim_info] = deal([]);
         end
 
         % Upsert: find existing entry for this folder or append
@@ -1075,6 +1213,8 @@ fig.CloseRequestFcn = @cb_close;
 
     function refreshCrop()
         cla(axSum);
+        axSum.Color = [0 0 0];
+        axSum.XLim = [0 1]; axSum.YLim = [0 1];
 
         if S.nROI == 0, return; end
 
@@ -1123,46 +1263,64 @@ fig.CloseRequestFcn = @cb_close;
         end
 
         [H, W] = size(baseImg);
-        halfSide = round(efDiameter.Value * efZoom.Value / 2);
+        um_per_px = 1.7778 / efZoom.Value;          % ScanImage default
+        halfSide  = round(30 / um_per_px / 2);       % 30 um crop box
+        boxSz     = 2 * halfSide + 1;                % guaranteed odd
         r1 = max(1, cy - halfSide);
         r2 = min(H, cy + halfSide);
         c1 = max(1, cx - halfSide);
         c2 = min(W, cx + halfSide);
 
-        cropImg  = baseImg(r1:r2, c1:c2);
-        cropMask = roiMask(r1:r2, c1:c2);
+        cropImg  = zeros(boxSz, boxSz);
+        cropMask = false(boxSz, boxSz);
+        pr1 = halfSide - (cy - r1) + 1;  % paste offset in padded box
+        pc1 = halfSide - (cx - c1) + 1;
+        cropImg(pr1:pr1+(r2-r1), pc1:pc1+(c2-c1))  = baseImg(r1:r2, c1:c2);
+        cropMask(pr1:pr1+(r2-r1), pc1:pc1+(c2-c1)) = roiMask(r1:r2, c1:c2);
 
-        % === Avg Projection with auto-contrast ===
-        imagesc(axSum, cropImg);
-        colormap(axSum, 'gray');
+        % === Summary-style display: percentile clip + gamma + burned-in ROI outline ===
+        cropImg = double(cropImg);
+        validPx = cropImg(cropImg > 0);
+        if isempty(validPx), validPx = cropImg(:); end
+        lo = prctile(validPx, 0.5);
+        hi = prctile(validPx, 99.5);
+        if hi <= lo, hi = lo + 1; end
+        cropImg = (cropImg - lo) / (hi - lo);
+        cropImg = max(0, min(1, cropImg));
+        cropImg = cropImg .^ 0.6;
+
+        % Build RGB and burn yellow ROI perimeter
+        patchRGB = repmat(cropImg, [1 1 3]);
+        roi_perim = bwperim(cropMask);
+        yellow = [1 1 0];
+        for ch = 1:3
+            plane = patchRGB(:,:,ch);
+            plane(roi_perim) = yellow(ch);
+            patchRGB(:,:,ch) = plane;
+        end
+
+        image(axSum, patchRGB);
         axis(axSum, 'image');
-
-        % Auto-contrast: 0.5/99.5 percentile of current ROI's F trace
-        % dFFout.F_dff is the frame-aligned raw F (mean pixel intensity)
-        if ~isempty(S.dFFout) && isfield(S.dFFout,'F_dff') ...
-                && ~isempty(S.dFFout.F_dff) && roiIdx <= size(S.dFFout.F_dff, 2)
-            F_roi = S.dFFout.F_dff(:, roiIdx);
-        elseif ~isempty(S.F_raw) && roiIdx <= size(S.F_raw, 2)
-            F_roi = S.F_raw(:, roiIdx);
-        else
-            F_roi = cropImg(:);
-        end
-        vlo = prctile(F_roi, 0.5);
-        vhi = prctile(F_roi, 99.5);
-        if vhi <= vlo, vhi = vlo + 1; end
-        clim(axSum, [vlo vhi]);
-
-        % Draw ROI boundary in yellow
-        hold(axSum, 'on');
-        if any(cropMask(:))
-            bnd = bwboundaries(cropMask);
-            for b = 1:numel(bnd)
-                plot(axSum, bnd{b}(:,2), bnd{b}(:,1), '-', 'Color', [1 1 0], 'LineWidth', 1.5);
-            end
-        end
-        hold(axSum, 'off');
+        set(axSum, 'XTick', [], 'YTick', []);
         axSum.Title.String = sprintf('Avg Proj  |  ROI %d', roiIdx);
         axSum.Title.Interpreter = 'none';
+
+    end
+
+    function cb_playMovie(~,~)
+        % Open per-ROI MP4 in system video player
+        if isempty(S.folderPath) || S.nROI == 0, return; end
+        movieDir = fullfile(S.folderPath, 'Fmovie_perROI');
+        vidPath = fullfile(movieDir, sprintf('ROI_%02d_movie.mp4', S.curROI));
+        if isfile(vidPath)
+            if ispc
+                winopen(vidPath);
+            else
+                system(sprintf('open "%s" &', vidPath));
+            end
+        else
+            uialert(fig, sprintf('Video not found:\n%s\nRun Batch_dffQC with MakeMontageVideo=true first.', vidPath), 'No Movie');
+        end
     end
 
     function refreshTrace()
@@ -1208,6 +1366,10 @@ fig.CloseRequestFcn = @cb_close;
         hSpikeSc.HitTest = 'off';
 
         xlim(axTrace, [S.t_img(1) S.t_img(end)]);
+        ylo = min(trace); yhi = max(trace);
+        if yhi <= ylo, yhi = ylo + 1; end
+        pad = (yhi - ylo) / 0.6 - (yhi - ylo);  % 20% padding each side
+        ylim(axTrace, [ylo - pad/2, yhi + pad/2]);
         [~, sessName] = fileparts(S.folderPath);
         axTrace.Title.String = sprintf('ROI %d / %d  --  %s', ...
             roiIdx, S.nROI, strrep(sessName,'_',' '));
@@ -1280,6 +1442,23 @@ fig.CloseRequestFcn = @cb_close;
         S.hRawFLine.HitTest = 'off';
 
         xlim(axRawF, [t_f(1) t_f(end)]);
+        fVals = rawF(1:numel(t_f));
+        flo = min(fVals); fhi = max(fVals);
+        if fhi <= flo, fhi = flo + 1; end
+        fpad = (fhi - flo) / 0.6 - (fhi - flo);
+        ylim(axRawF, [flo - fpad/2, fhi + fpad/2]);
+        % Trim lines (yellow) on Raw F
+        tStart = efTrimStart.Value;
+        tEnd   = efTrimEnd.Value;
+        if tStart > t_f(1)
+            xline(axRawF, tStart, '-', 'Color', [0.9 0.8 0.0], 'LineWidth', 1.5, ...
+                'Label', 'trim start', 'LabelHorizontalAlignment', 'right');
+        end
+        if isfinite(tEnd) && tEnd < t_f(end)
+            xline(axRawF, tEnd, '-', 'Color', [0.9 0.8 0.0], 'LineWidth', 1.5, ...
+                'Label', 'trim end', 'LabelHorizontalAlignment', 'left');
+        end
+
         axRawF.Title.String = sprintf('Raw F  |  ROI %d', S.curROI);
         axRawF.Title.Interpreter = 'none';
         axRawF.YLabel.String = 'F (mean pixel intensity)';
@@ -1346,44 +1525,100 @@ end  % enforce_min_distance
 %% LOCAL HELPER -- scan for dFF sessions
 %% =========================================================================
 function sessions = scanForDFFSessions(masterFolder)
-%SCANFORDFF SESSIONS  Recursively find all subfolders containing a *_dFF.mat file.
+%SCANFORDFF SESSIONS  Recursively find all subfolders containing a *_dFF.mat
+%   or *_cpSAM_output.mat (with F but no dFF yet).
 %   Returns a cell array of structs with fields:
 %       .folder   -- path to the subfolder
-%       .dffFile  -- path to the *_dFF.mat file
-%       .samFile  -- path to the *_cpSAM_output.mat file (or '' if not found)
+%       .dffFile  -- path to the *_dFF.mat file ('' if needs computing)
+%       .samFile  -- path to the *_cpSAM_output.mat file (or '')
+%       .tifFile  -- path to the *_minusDark_MC.tif file (or '')
 %   Sorted alphabetically by folder path.
 
 sessions = {};
+folderSet = containers.Map('KeyType','char','ValueType','logical');
 
-% Recursive glob for dFF.mat files
+% 1) Recursive glob for dFF.mat files
 hits = dir(fullfile(masterFolder, '**', '*_dFF.mat'));
-if isempty(hits), return; end
+if ~isempty(hits)
+    folders  = {hits.folder};
+    [uFolders, ia] = unique(folders, 'stable');
+    for i = 1:numel(uFolders)
+        h = hits(ia(i));
+        folder  = h.folder;
+        dffFile = fullfile(folder, h.name);
 
-% One entry per unique folder (take first dFF if multiple exist)
-folders  = {hits.folder};
-[uFolders, ia] = unique(folders, 'stable');
+        samHits = dir(fullfile(folder, '*_cpSAM_output.mat'));
+        samFile = '';
+        if ~isempty(samHits), samFile = fullfile(folder, samHits(1).name); end
 
-for i = 1:numel(uFolders)
-    h = hits(ia(i));
-    folder  = h.folder;
-    dffFile = fullfile(folder, h.name);
+        tifFile = find_mc_tif(folder);
 
-    % Look for paired cpSAM_output.mat
-    samHits = dir(fullfile(folder, '*_cpSAM_output.mat'));
-    samFile = '';
-    if ~isempty(samHits), samFile = fullfile(folder, samHits(1).name); end
+        sessions{end+1} = struct('folder',  folder, ...
+                                 'dffFile', dffFile, ...
+                                 'samFile', samFile, ...
+                                 'tifFile', tifFile); %#ok<AGROW>
+        folderSet(folder) = true;
+    end
+end
 
-    % Look for paired minusDark_MC.tif (mean projection source)
-    tifHits = dir(fullfile(folder, '*_minusDark_MC.tif'));
-    tifFile = '';
-    if ~isempty(tifHits), tifFile = fullfile(folder, tifHits(1).name); end
+% 2) Also find folders with *_cpSAM_output.mat but NO *_dFF.mat
+samHitsAll = dir(fullfile(masterFolder, '**', '*_cpSAM_output.mat'));
+if ~isempty(samHitsAll)
+    folders  = {samHitsAll.folder};
+    [uFolders, ia] = unique(folders, 'stable');
+    for i = 1:numel(uFolders)
+        folder = uFolders{i};
+        if folderSet.isKey(folder), continue; end   % already have a dFF entry
 
-    sessions{end+1} = struct('folder',  folder, ...
-                             'dffFile', dffFile, ...
-                             'samFile', samFile, ...
-                             'tifFile', tifFile); %#ok<AGROW>
+        % Verify the SAM file actually contains F
+        samFile = fullfile(folder, samHitsAll(ia(i)).name);
+        try
+            w = whos('-file', samFile, 'F');
+            if isempty(w), continue; end   % no F variable — skip
+        catch
+            continue;
+        end
+
+        tifFile = find_mc_tif(folder);
+
+        sessions{end+1} = struct('folder',  folder, ...
+                                 'dffFile', '', ...
+                                 'samFile', samFile, ...
+                                 'tifFile', tifFile); %#ok<AGROW>
+        folderSet(folder) = true;
+    end
 end
 end  % scanForDFFSessions
+
+
+%% =========================================================================
+%% LOCAL HELPER -- dFF computation (dispatch to helper or local fallback)
+%% =========================================================================
+function dFFout = dFF_RZ_dispatch(F)
+%DFF_RZ_DISPATCH  Compute dF/F using helper.dFF_RZ if available, else local fallback.
+%   F: [T x N] single/double ok
+try
+    dFFout = helper.dFF_RZ(F, 'BaselineWinSec', 20);
+catch
+    dFFout = dFF_RZ_local(F);
+end
+end
+
+function out = dFF_RZ_local(F)
+%DFF_RZ_LOCAL  Simple robust dF/F fallback.
+%   F0 per ROI = 20th percentile over time (robust baseline)
+%   dFF = (F - F0) ./ max(F0, eps)
+F = double(F);
+F0 = prctile(F, 20, 1);
+F0(F0 <= 0) = eps;
+dFF = (F - F0) ./ F0;
+
+out = struct();
+out.F0    = F0;
+out.dFF   = dFF;
+out.F_dff = F;   % frame-aligned raw F (after toss)
+out.t_dff = [];  % caller should set from fps
+end
 
 
 %% =========================================================================
@@ -1403,4 +1638,24 @@ function pyExe = detectPyExe()
     for i = 1:numel(candidates)
         if isfile(candidates{i}), pyExe = candidates{i}; return; end
     end
+end
+
+
+%% =========================================================================
+%% LOCAL HELPER -- find MC'd single-channel TIFF
+%% =========================================================================
+function tifFile = find_mc_tif(folder)
+%FIND_MC_TIF  Locate the best MC TIFF for movie playback.
+%   Priority: preproc_MC_MC > preproc_MC > minusDark_MC > any *MC*.tif
+tifFile = '';
+patterns = {"*_preproc_MC_MC.tif", "*_preproc_MC.tif", "*_minusDark_MC.tif"};
+for ip = 1:numel(patterns)
+    hits = dir(fullfile(folder, patterns{ip}));
+    % Filter out AVG/QC/shifts/label TIFs
+    hits = hits(~contains({hits.name}, {'_AVG','_QC','_shifts','_label','_SELROI'}, 'IgnoreCase', true));
+    if ~isempty(hits)
+        tifFile = fullfile(hits(end).folder, hits(end).name);
+        return;
+    end
+end
 end

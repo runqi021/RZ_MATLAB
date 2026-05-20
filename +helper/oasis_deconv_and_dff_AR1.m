@@ -18,7 +18,7 @@ function [F_oasis_deconv, dFF_oasis_deconv, spikes_oasis, baseline_oasis] = ...
 %
 % Optional name/value:
 %   'PythonExe' : path to Python with oasis-deconv installed
-%                 (default: 'C:\Users\zhang\anaconda3\envs\cellpose-gpu\python.exe')
+%                 (auto-detected from conda envs 'oasis' or 'cellpose-gpu')
 %
 % Outputs
 %   F_oasis_deconv   : T x N deconvolved calcium traces c(t)
@@ -30,46 +30,71 @@ function [F_oasis_deconv, dFF_oasis_deconv, spikes_oasis, baseline_oasis] = ...
 
     % ---- parse optional PythonExe ----
     p = inputParser;
-    addParameter(p, 'PythonExe', ...
-        'C:\Users\zhang\anaconda3\envs\cellpose-gpu\python.exe');
+    addParameter(p, 'PythonExe', '');
     parse(p, varargin{:});
     pythonExe = p.Results.PythonExe;
 
+    % Auto-detect if not provided
+    if isempty(pythonExe)
+        up = getenv('USERPROFILE');
+        pyCands = { ...
+            fullfile(up, '.conda',     'envs','cellpose-gpu','python.exe'), ...
+            fullfile(up, 'anaconda3',  'envs','cellpose-gpu','python.exe'), ...
+            fullfile(up, 'miniconda3', 'envs','cellpose-gpu','python.exe'), ...
+            fullfile(up, '.conda',     'envs','oasis','python.exe'), ...
+            fullfile(up, 'anaconda3',  'envs','oasis','python.exe'), ...
+            fullfile(up, 'miniconda3', 'envs','oasis','python.exe') };
+        for ii = 1:numel(pyCands)
+            if isfile(pyCands{ii}), pythonExe = pyCands{ii}; break; end
+        end
+    end
+    assert(~isempty(pythonExe) && isfile(pythonExe), ...
+        'Python executable not found. Provide ''PythonExe'' or install oasis conda env.');
+
     %% --- Set Python env for OASIS --- %%
     pe = pyenv;
+    needsSwitch = false;
     if pe.Status == "NotLoaded"
+        % First time — set to our env
         try
             pyenv('Version', pythonExe, 'ExecutionMode', 'OutOfProcess');
         catch
-            % fallback: try default mode
             pyenv('Version', pythonExe);
         end
-    else
-        if ~contains(string(pe.Version), pythonExe)
-            warning("MATLAB Python already set to: %s\nTo change, restart MATLAB and rerun.", ...
-                    pe.Version);
+    elseif ~strcmpi(string(pe.Executable), pythonExe)
+        needsSwitch = true;
+        % Try to terminate OutOfProcess Python and reload
+        try
+            terminate(pyenv);
+            pause(1);
+            pyenv('Version', pythonExe, 'ExecutionMode', 'OutOfProcess');
+            needsSwitch = false;
+        catch
+            % terminate failed (InProcess or other reason)
+        end
+        if needsSwitch
+            error(['MATLAB Python is already loaded with:\n  %s\n\n' ...
+                   'OASIS needs:\n  %s\n\n' ...
+                   'Please restart MATLAB and run OASIS before any other ' ...
+                   'Python calls (e.g. Cellpose).'], ...
+                   string(pe.Executable), pythonExe);
         end
     end
 
+    % Import oasis
     try
         py.importlib.import_module('oasis');
-        py.importlib.import_module('oasis.functions');
+        oasisF = py.importlib.import_module('oasis.functions');
+        np     = py.importlib.import_module('numpy');
     catch ME
+        curPy = '';
+        try curPy = string(pyenv().Executable); catch; end
         error(['Python OASIS not available in this env.\n' ...
                'Make sure you ran:\n' ...
-               '  conda activate <env>\n' ...
+               '  conda activate oasis\n' ...
                '  conda install -c conda-forge oasis-deconv\n\n' ...
-               'Original error:\n%s'], ME.message);
-    end
-
-    try
-        np     = py.importlib.import_module('numpy');
-        oasisF = py.importlib.import_module('oasis.functions');
-    catch ME
-        error(['Python OASIS not available.\n' ...
-               'Make sure pyenv points to an environment where you ran:\n' ...
-               '  conda install -c conda-forge oasis-deconv\n\n' ...
-               'Original error:\n%s'], ME.message);
+               'Current pyenv: %s\n' ...
+               'Original error:\n%s'], curPy, ME.message);
     end
 
     F_oasis_deconv   = zeros(T, N);
@@ -81,12 +106,17 @@ function [F_oasis_deconv, dFF_oasis_deconv, spikes_oasis, baseline_oasis] = ...
     g_tuple = py.tuple(num2cell(g(:).'));  % 1-element tuple
 
     for i = 1:N
-        y = double(F(:, i));
+        y = double(F(:, i)');
         y_np = np.array(y);
 
+        % Estimate noise std in MATLAB (MAD of first differences)
+        % This avoids calling estimate_parameters() inside OASIS,
+        % which segfaults due to scipy.linalg.toeplitz + numpy 2.x incompatibility.
+        sn = median(abs(diff(y))) / 0.6745;
+
         try
-            % AR(1) with fixed g
-            out = oasisF.deconvolve(y_np, g_tuple, pyargs('penalty', int32(0)));
+            % AR(1) with fixed g and pre-computed sn
+            out = oasisF.deconvolve(y_np, g_tuple, pyargs('sn', sn, 'penalty', int32(0)));
             c_py = out{1};
             s_py = out{2};
             b_py = out{3};
@@ -94,6 +124,7 @@ function [F_oasis_deconv, dFF_oasis_deconv, spikes_oasis, baseline_oasis] = ...
             c = double(py.array.array('d', c_py.tolist()));
             s = double(py.array.array('d', s_py.tolist()));
             b = double(b_py);
+            fprintf('ROI %d: b=%.2f, max(c)=%.2f, nnz(s)=%d\n', i, b, max(c), nnz(s));
 
         catch ME
             warning('OASIS AR(1) failed on ROI %d: %s\nUsing fallback.', i, ME.message);

@@ -4,7 +4,7 @@
 F(1:30, :) = [];
 
 %% dFF
-dFFout = dFF_RZ(F);
+dFFout = helper.dFF_RZ(F);
 dFF = dFFout.dFF;
 %% ------------------- BASIC PARAMS ---------------------------
 [T, N_roi] = size(dFF);
@@ -165,7 +165,7 @@ grid('on');
 
 %%
 g = 0.93;
-[F_oasis_deconv, dFF_oasis_deconv, spikes_oasis, baseline_oasis] = oasis_deconv_and_dff_AR1(F, g);
+[F_oasis_deconv, dFF_oasis_deconv, spikes_oasis, baseline_oasis] = helper.oasis_deconv_and_dff_AR1(F, g);
 
 %%
 stackDFF(dFF, dFF_oasis_deconv);
@@ -176,7 +176,7 @@ dFF_keep = dFF(:, keepIdx);
 
 %%
 g = 0.93;
-[F_keep_deconv, dFF_keep_deconv, spikes_oasis, baseline_oasis] = oasis_deconv_and_dff_AR1(F_keep, g);
+[F_keep_deconv, dFF_keep_deconv, spikes_oasis, baseline_oasis] = helper.oasis_deconv_and_dff_AR1(F_keep, g);
 
 %%
 stackDFF(dFF_keep, dFF_keep_deconv);

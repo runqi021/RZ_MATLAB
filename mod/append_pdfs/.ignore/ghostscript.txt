@@ -1,1 +1,1 @@
-C:\Program Files\gs\gs10.06.0\bin\gswin64c.exe
+C:\Program Files\gs\gs10.07.0\bin\gswin64c.exe

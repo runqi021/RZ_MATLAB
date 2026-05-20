@@ -106,7 +106,7 @@ elseif usfac == 1
     end
     CC = ifft2(buf_prod);
     CCabs = abs(CC);
-    [row_shift, col_shift] = find(CCabs == max(CCabs(:)));
+    [row_shift, col_shift] = find(CCabs == max(CCabs(:)), 1, 'first');
     if Nr(row_shift) > max_shift(1) || Nc(col_shift) > max_shift(2) || Nr(row_shift) < min_shift(1) || Nc(col_shift) < min_shift(2)
         CCabs2 = CCabs;
         CCabs2(Nr>max_shift(1),:) = 0;

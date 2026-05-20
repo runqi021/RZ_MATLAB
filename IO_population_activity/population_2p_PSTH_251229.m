@@ -8,16 +8,16 @@ F_raw = SAMload.F;
 F = F_raw;
 F(1:30, :)=[];
 %%
-dFFout = dFF_RZ(F);
+dFFout = helper.dFF_RZ(F);
 dFF = dFFout.dFF;
 
 %%
-stackDFF(dFF);
-hmapDFF(dFF);
-%hmapDFF(dFF, 30, [0 99.5], bluewhitered);
+helper.stackDFF(dFF);
+helper.hmapDFF(dFF);
+%helper.hmapDFF(dFF, 30, [0 99.5], bluewhitered);
 %%
 g = 0.93;
-[F_oasis_deconv, dFF_oasis_deconv, spikes_oasis, baseline_oasis] = oasis_deconv_and_dff_AR1(F, g);
+[F_oasis_deconv, dFF_oasis_deconv, spikes_oasis, baseline_oasis] = helper.oasis_deconv_and_dff_AR1(F, g);
 %% event detection
 % assume: dFF is T x N, fs = 30 Hz
 [T,N] = size(dFF_oasis_deconv);
@@ -81,9 +81,9 @@ dFF_denoise_active= dFF_oasis_deconv(:, idxActive);
 S_active          = S(:, idxActive);
 
 % now all are T x N_active, same columns = same ROIs
-stackDFF(dFF_active, dFF_denoise_active, fs, 'krb', 0.5, 0.6, S_active, 0.2);
-hmapDFF(dFF_active);
-%hmapDFF(dFF_active, 30, [0 99.5], bluewhitered);
+helper.stackDFF(dFF_active, dFF_denoise_active, fs, 'krb', 0.5, 0.6, S_active, 0.2);
+helper.hmapDFF(dFF_active);
+%helper.hmapDFF(dFF_active, 30, [0 99.5], bluewhitered);
 %% Raster (vertical bar style) for good ROIs only
 Ngood    = numel(idxActive);
 

@@ -26,7 +26,7 @@ rawDir = "D:\RUNQI\260319_shiver_cal-590_enblock";  % contains ch*/avgz
 % Channel IDs: first element = reference channel for registration
 %   Two-channel:  channels = [3 1]   (ref=3, other=1)
 %   Single-channel: channels = 3
-channels = 2;
+channels = [3 1];
 
 nReqCh = numel(channels);
 if nReqCh == 2

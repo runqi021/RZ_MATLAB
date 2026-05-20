@@ -1,5 +1,5 @@
 % Batch
-folderPath = 'D:\RUNQI\phys\processed\sound';
+folderPath = 'D:\batch_dffQC_test_260325\260322_sst_soma_g8s\phys\processed\IO and sound\sound';
 list = dir(folderPath);
 
 ct = 0;
@@ -26,19 +26,19 @@ for k = 1:numel(list)
         T_cycle = 10;
         
         fs = 30 % Hz
-        toss = 5; % Sec
+        toss = 4; % Sec
         F(1:fs*toss, :) = [];
         F(end-98:end, :) = [];
         
         [T, N] = size(F);
         t = (0:T-1) / fs;
         
-        dFF = dFF_RZ(F).dFF;
+        dFF = helper.dFF_RZ(F).dFF;
         
         t_pulse = linspace(T_base,T_base+T_cycle-1, n_pulse);
         
         %% stackDFF and stim overlay
-        stackDFF(dFF);
+        helper.stackDFF(dFF);
         
         for i = 1:numel(t_pulse)
             x1 = t_pulse(i);
@@ -58,7 +58,7 @@ for k = 1:numel(list)
         %fprintf('Saved:\n  %s\n', outFig);
         
         %%
-        hmapDFF(dFF);
+        helper.hmapDFF(dFF);
         for i = 1:numel(t_pulse)
             xline(t_pulse(i), 'LineWidth',3);
             % x1 = t_pulse(i);

@@ -25,11 +25,11 @@ S.folderPath   = '';
 S.csvFile      = '';
 S.editMode     = 'none';  % 'none' | 'add' | 'delete'
 S.masterFolder = '';
-S.sessionList  = {};    % cell array of structs: .folder .csvFile
+S.sessionList  = {};    % cell array of structs: .folder .csvFile .csvStem .matFile .figBase
 S.sessionIdx   = 0;
 
 % ── Factory defaults (restored by Reset button) ───────────────────────────
-DEFAULTS.fps          = 30;
+DEFAULTS.fps          = 50.7;
 DEFAULTS.dotsOn       = [true true true false];
 DEFAULTS.coordTypes   = {'y','y','y','y'};
 DEFAULTS.likelihood   = 0.5;
@@ -102,7 +102,7 @@ r=r+1; h=uilabel(cGL,'Text','── Camera ──','FontWeight','bold');
 
 r=r+1; h=uilabel(cGL,'Text','Camera FPS:');
        h.Layout.Row=r; h.Layout.Column=1;
-       efFps = uieditfield(cGL,'numeric','Value',30, ...
+       efFps = uieditfield(cGL,'numeric','Value',DEFAULTS.fps, ...
            'Limits',[1 2000],'ValueChangedFcn',@cb_updateTrace);
        efFps.Layout.Row=r; efFps.Layout.Column=2;
 
@@ -228,6 +228,9 @@ r=r+1; btnClearAll = uibutton(cGL,'Text','Clear All Sorted Data (All Folders)', 
 if ispref('BreathingPeakGUI','workingParams')
     try, applyWorkingParams(getpref('BreathingPeakGUI','workingParams')); catch, end
 end
+% fps is dataset-specific, not a UI preference — always force from DEFAULTS
+% on launch (and from a loaded session's findpeak_params.camera_fps later).
+efFps.Value = DEFAULTS.fps;
 
 %% ── Right: plot panel ────────────────────────────────────────────────────
 rightGL = uigridlayout(rootGL, [2 1]);
@@ -313,9 +316,9 @@ fig.KeyPressFcn = @cb_key;
         S.peaks      = [];
         S.rawData    = [];
 
-        % Show current folder name
-        [~, folderName] = fileparts(S.folderPath);
-        lblCurrentFolder.Text = folderName;
+        % Show CSV stem as session label
+        sessionLabel = sess.csvStem;
+        lblCurrentFolder.Text = sessionLabel;
         updateNavDisplay();
 
         % Read DLC CSV
@@ -327,8 +330,12 @@ fig.KeyPressFcn = @cb_key;
         S.rawData = raw;
         detectAndApplyDots(S.csvFile);
 
-        % Check for previously saved results
-        matFile = fullfile(S.folderPath,'breath_peak_data.mat');
+        % Check for previously saved results (try new name, fall back to old)
+        matFile = sess.matFile;
+        if ~isfile(matFile)
+            matFile_old = fullfile(sess.folder, 'breath_peak_data.mat');
+            if isfile(matFile_old), matFile = matFile_old; end
+        end
         if isfile(matFile)
             try
                 saved = load(matFile,'insp_onset_idx','findpeak_params');
@@ -357,7 +364,7 @@ fig.KeyPressFcn = @cb_key;
                     S.peaks = saved.insp_onset_idx(:);
                     redraw_peaks();
                 end
-                lblCurrentFolder.Text = [folderName '  ✓'];
+                lblCurrentFolder.Text = [sessionLabel '  ✓'];
                 updateNavDisplay();
                 return;
             catch
@@ -407,8 +414,7 @@ fig.KeyPressFcn = @cb_key;
 
     function updateNavDisplay()
         n = numel(S.sessionList);
-        nDone = sum(cellfun(@(s) isfile(fullfile(s.folder,'breath_peak_data.mat')), ...
-                            S.sessionList));
+        nDone = sum(cellfun(@(s) isfile(s.matFile), S.sessionList));
         lblNavStatus.Text = sprintf('%d / %d  folders  |  %d complete', ...
                                     S.sessionIdx, n, nDone);
     end
@@ -586,14 +592,15 @@ fig.KeyPressFcn = @cb_key;
             'Icon','warning');
         if ~strcmp(answer,'Delete All'), return; end
 
-        targets   = {'breath_peak_data.mat','breath_peak_figure.fig','breath_peak_figure.png'};
         nDeleted  = 0;
         for i = 1:n
-            folder = S.sessionList{i}.folder;
+            sess_i = S.sessionList{i};
+            targets = {sess_i.matFile, ...
+                       [sess_i.figBase '.fig'], ...
+                       [sess_i.figBase '.png']};
             for f = 1:numel(targets)
-                fp = fullfile(folder, targets{f});
-                if isfile(fp)
-                    delete(fp);
+                if isfile(targets{f})
+                    delete(targets{f});
                     nDeleted = nDeleted + 1;
                 end
             end
@@ -679,13 +686,13 @@ fig.KeyPressFcn = @cb_key;
         findpeak_params.csv_file       = S.csvFile;
         findpeak_params.saved_at       = datestr(now);        %#ok<TNOW1,DATST>
 
-        outFile = fullfile(S.folderPath,'breath_peak_data.mat');
+        sess    = S.sessionList{S.sessionIdx};
+        outFile = sess.matFile;
         save(outFile,'insp_onset_idx','insp_onsets_t','insp_onsets_amp','insp_onsets_train', ...
                      'breath','t_breath','findpeak_params');
 
         % Save figure screenshots
-        figBase = fullfile(S.folderPath,'breath_peak_figure');
-        saveScreenshots(figBase);
+        saveScreenshots(sess.figBase);
 
         uialert(fig, sprintf('Saved %d peaks →\n%s\n+ .fig and .png', numel(S.peaks), outFile), ...
             'Saved','Icon','success');
@@ -693,7 +700,8 @@ fig.KeyPressFcn = @cb_key;
     end
 
     function saveScreenshots(outBase)
-        [~, sessName] = fileparts(S.folderPath);
+        sess = S.sessionList{S.sessionIdx};
+        sessName = sess.csvStem;
 
         hFig = figure('Visible','off','Color','white','Position',[100 100 1400 820]);
 
@@ -920,9 +928,15 @@ end  % compute_prominence
 
 
 function sessions = scanForSessions(masterFolder)
-%SCANFORSESSIONS  Recursively find all subfolders containing a DLC CSV file.
-%   Returns a cell array of structs with fields .folder and .csvFile,
-%   sorted alphabetically by folder path.
+%SCANFORSESSIONS  Recursively find all DLC CSV files under masterFolder.
+%   Returns a cell array of structs with fields:
+%     .folder      — directory containing the CSV
+%     .csvFile     — full path to the CSV
+%     .csvStem     — CSV filename without extension (used for output naming)
+%     .matFile     — full path for the output breath_peak_data .mat
+%     .figBase     — full path base (no extension) for output figures
+%   One session per CSV — works whether CSVs are spread across subfolders
+%   or all live in a single folder.
 
 sessions = {};
 
@@ -933,12 +947,20 @@ if isempty(hits)
 end
 if isempty(hits), return; end
 
-% One entry per unique folder (take first CSV if multiple exist)
-folders  = {hits.folder};
-[uFolders, ia] = unique(folders,'stable');
-for i = 1:numel(uFolders)
-    h = hits(ia(i));
-    sessions{end+1} = struct('folder', h.folder, ...        %#ok<AGROW>
-                             'csvFile', fullfile(h.folder, h.name));
+% One entry per CSV file (not per folder)
+for i = 1:numel(hits)
+    h       = hits(i);
+    csvPath = fullfile(h.folder, h.name);
+    [~, stem] = fileparts(h.name);
+    sessions{end+1} = struct( ...                            %#ok<AGROW>
+        'folder',  h.folder, ...
+        'csvFile', csvPath, ...
+        'csvStem', stem, ...
+        'matFile', fullfile(h.folder, [stem '_breath_peak_data.mat']), ...
+        'figBase', fullfile(h.folder, [stem '_breath_peak_figure']));
 end
+
+% Sort alphabetically by CSV path for deterministic ordering
+[~, ord] = sort(cellfun(@(s) s.csvFile, sessions, 'UniformOutput',false));
+sessions = sessions(ord);
 end  % scanForSessions
