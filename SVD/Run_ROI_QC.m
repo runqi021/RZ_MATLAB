@@ -14,7 +14,7 @@ clear all; clc; close all;
 %% ======================================================================
 %  USER-EDITABLE PARAMETERS
 %  ======================================================================
-folderPath           = "D:\batch_dffQC_test_260325\260224_vglut2_soma_g8s\phys\processed\breathing\pFN_roi4_z0_512x512_5x_2000f_00001";      % <-- paste data subfolder
+folderPath           = "C:\Users\Admin\Desktop\ChAT_analysis\0124\IO\roi3_R_-1000_140_2x_34lp_512x256_00001";      % <-- paste data subfolder
 patchSize_um         = 40;      % local SVD patch size (microns), square
 nLocalModes          = 30;      % truncated SVD modes per ROI
 skewnessThreshold    = 0.3;     % dFF skewness below this -> suspect

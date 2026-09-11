@@ -40,14 +40,12 @@ tossFrames = round(ip.Results.TossFrames);
 tiffPath = char(string(tiffPath));
 assert(exist(tiffPath,'file') == 2, 'File not found: %s', tiffPath);
 
-% --- start parallel pool if available ---
-try
-    if isempty(gcp('nocreate'))
-        gcp;    % start default pool
-    end
-catch
-    % no parallel toolbox, ignore
-end
+% --- parallel pool ---
+% Rigid MC runs with use_parallel=false, so NoRMCorre does NOT use the pool
+% here. A 12-worker local pool needlessly holds several GB during registration
+% -- the exact moment long movies (e.g. 18000 frames) hit the RAM ceiling and
+% throw "Out of memory". So do NOT auto-start a pool; an existing one is left
+% untouched (still unused by rigid MC).
 
 % --- read movie ---
 fprintf('Reading movie: %s\n', tiffPath);
@@ -90,49 +88,67 @@ else
     toc;
 end
 
-% --- save corrected movie as TIFF first (protect expensive MC result) ---
+% --- output path ---
 [folder, base, ext] = fileparts(tiffPath);
 folder = char(folder); base = char(base); ext = char(ext);
 outname = char(fullfile(folder, [base '_MC' ext]));
 
-mc = M1;
-switch inClass
-    case {'uint8','uint16','uint32'}
-        mc(mc < 0) = 0;
-        maxType = double(intmax(inClass));
-        mc(mc > maxType) = maxType;
-        mc = cast(mc, inClass);
-
-    case {'int8','int16','int32'}
-        minType = double(intmin(inClass));
-        maxType = double(intmax(inClass));
-        mc(mc < minType) = minType;
-        mc(mc > maxType) = maxType;
-        mc = cast(mc, inClass);
-
-    otherwise
-        % leave as single
-end
-
-fprintf('Saving motion-corrected movie to:\n%s\n', outname);
-
-Tsave = size(mc,3);
-for t = 1:Tsave
-    frOut = mc(:,:,t);
-    if t == 1
-        imwrite(frOut, outname, 'Compression', 'none');
-    else
-        imwrite(frOut, outname, 'WriteMode', 'append', 'Compression', 'none');
-    end
-end
-
-% --- compute motion metrics ---
+% --- motion metrics (QC-only) -------------------------------------------
+% motion_metrics runs corr() on a full [pixels x frames] matrix, which builds
+% several whole-movie copies and exhausts RAM on long movies (this is where
+% 12000/18000-frame runs OOMed / hung in corr). Metrics only feed the QC plot,
+% so: (a) subsample frames when T is large, (b) free Y before corr(). The saved
+% MC movie is unaffected (full resolution, all frames).
 fprintf('Computing motion metrics...\n');
-nnY = quantile(Y(:),0.005);
-mmY = quantile(Y(:),0.995);
+mstride = max(1, ceil(T/3000));            % feed <=~3000 frames into corr()
+tcorr   = 1:mstride:T;                      % frame indices used for the QC plot
 
-[cY, mY, vY]   = motion_metrics(Y,  10);
-[cM1, mM1, vM1]= motion_metrics(M1, 10);
+% display range from a cheap linear-index subsample (avoids quantile(Y(:)) copy)
+ssv = Y(1:max(1,round(numel(Y)/5e6)):end);
+nnY = quantile(ssv, 0.005);  mmY = quantile(ssv, 0.995);  clear ssv;
+
+if mstride > 1
+    Ysub = Y(:,:,tcorr);                   % small copy (~3 GB)
+    clear Y;                               % free raw movie (~19 GB) before corr()
+    [cY, mY, vY] = motion_metrics(Ysub, 10);
+    clear Ysub;
+    [cM1, mM1, vM1] = motion_metrics(M1(:,:,tcorr), 10);
+else
+    [cY,  mY,  vY ] = motion_metrics(Y,  10);
+    clear Y;
+    [cM1, mM1, vM1] = motion_metrics(M1, 10);
+end
+
+% --- save corrected movie (chunked cast + BigTIFF append) ---------------
+% Cast per chunk instead of materializing a whole-movie 'mc' duplicate, and
+% write via saveastiff (append+big) so long movies stream out as BigTIFF with
+% bounded RAM and no classic-TIFF 4GB cap. Small movies still produce a normal
+% (auto classic-vs-big) TIFF.
+fprintf('Saving motion-corrected movie to:\n%s\n', outname);
+if exist('saveastiff','file') == 2
+    Twrite   = size(M1,3);
+    wchunk   = 1000;                 % frames per write block (~1 GB at 512x512 single)
+    firstBlk = true;
+    for c0 = 1:wchunk:Twrite
+        c1  = min(c0 + wchunk - 1, Twrite);
+        blk = clip_cast_block(M1(:,:,c0:c1), inClass);
+        saveastiff(blk, outname, struct('append', ~firstBlk, 'big', true, ...
+            'message', false, 'overwrite', firstBlk));
+        firstBlk = false;
+    end
+    clear blk;
+else
+    % Fallback: whole-array cast + classic imwrite append (4 GB-limited).
+    mc = clip_cast_block(M1, inClass);
+    for t = 1:size(mc,3)
+        if t == 1
+            imwrite(mc(:,:,t), outname, 'Compression', 'none');
+        else
+            imwrite(mc(:,:,t), outname, 'WriteMode', 'append', 'Compression', 'none');
+        end
+    end
+    clear mc;
+end
 
 % --- pack outputs and save .mat ---
 metrics = struct();
@@ -163,7 +179,7 @@ try
               title('mean raw data','fontsize',14,'fontweight','bold');
         ax2 = subplot(2,2,2); imagesc(mM1,[nnY,mmY]); axis equal; axis tight; axis off;
               title('mean rigid corrected','fontsize',14,'fontweight','bold');
-        subplot(2,2,3); plot(1:T, cY, 1:T, cM1);
+        subplot(2,2,3); plot(tcorr, cY, tcorr, cM1);
               legend('raw','rigid'); title('correlation coefficients','fontsize',14,'fontweight','bold');
         subplot(2,2,4);
               scatter(cY, cM1); hold on;
@@ -204,4 +220,22 @@ end
 
 fprintf('Rigid MC complete.\n');
 
+end
+
+% ------------------------------------------------------------------------
+function blk = clip_cast_block(blk, inClass)
+% Clip out-of-range values then cast a single-precision block back to the
+% original integer class (float classes are left as single).
+switch inClass
+    case {'uint8','uint16','uint32'}
+        blk(blk < 0) = 0;
+        mx = double(intmax(inClass)); blk(blk > mx) = mx;
+        blk = cast(blk, inClass);
+    case {'int8','int16','int32'}
+        mn = double(intmin(inClass)); blk(blk < mn) = mn;
+        mx = double(intmax(inClass)); blk(blk > mx) = mx;
+        blk = cast(blk, inClass);
+    otherwise
+        % leave as single
+end
 end

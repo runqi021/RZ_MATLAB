@@ -1,0 +1,30 @@
+# Outputs and data — regenerable, and far larger than the code.
+# 329 MB of these vs 6.9 MB of source at the time this was written.
+*.mat
+*.mp4
+*.avi
+*.mkv
+*.tif
+*.tiff
+*.png
+*.jpg
+*.jpeg
+*.pdf
+*.fig
+*.eps
+*.svg
+
+# MATLAB editor autosaves
+*.asv
+*.m~
+
+# Python
+__pycache__/
+*.pyc
+
+# Scratch / transient
+scratchpad/
+lint/
+.claude/scheduled_tasks.lock
+*.bak
+*.m.bak

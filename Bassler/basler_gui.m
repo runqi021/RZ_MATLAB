@@ -57,6 +57,12 @@ splitGapField = uieditfield(bp, 'numeric', 'Value', 5, ...
     'Position', [38 125 40 20]);
 uilabel(bp, 'Text', 's', 'Position', [80 125 15 20]);
 
+% Free-run has no trigger gap to end a run, so it needs an explicit duration.
+uilabel(bp, 'Text', 'Free-run dur:', 'Position', [110 125 72 20]);
+freerunDurField = uieditfield(bp, 'numeric', 'Value', 300, ...
+    'Position', [185 125 55 20]);
+uilabel(bp, 'Text', 's', 'Position', [243 125 15 20]);
+
 runLabel = uilabel(bp, 'Text', 'Run: 000', ...
     'Position', [735 80 70 22], 'FontWeight', 'bold');
 
@@ -98,7 +104,7 @@ function controls = createCameraPanel(parent, tag, serial, ...
 
     uilabel(parent, 'Text', 'Trigger:', 'Position', [5 y 45 20]);
     controls.trigger = uidropdown(parent, ...
-        'Items', {'hardware','burst'}, ...
+        'Items', {'hardware','burst','freerun'}, ...
         'Value', trigDefault, ...
         'Position', [52 y 80 20]);
     uilabel(parent, 'Text', 'Edge:', 'Position', [137 y 32 20]);
@@ -164,13 +170,14 @@ function onTriggerChange(dd, controls)
     if ~controls.enable.Value
         return;
     end
-    % FPS is editable in both modes:
-    %   hardware -> used to cap exposure + stamp AVI metadata at 2P rate
-    %   burst    -> internal frame rate of each burst
+    % FPS is editable in all modes:
+    %   hardware -> caps exposure + stamps AVI metadata at the 2P rate
+    %   burst    -> internal frame rate within each burst
+    %   freerun  -> the camera's own (untriggered) acquisition frame rate
     controls.fps.Enable = 'on';
     if strcmp(dd.Value, 'burst')
-        controls.burstN.Enable = 'on';
-    else % hardware
+        controls.burstN.Enable = 'on';   % Burst N only matters in burst mode
+    else % hardware or freerun
         controls.burstN.Enable = 'off';
     end
 end
@@ -268,6 +275,50 @@ function onRecord()
         return;
     end
 
+    % ── Preflight: ask each camera whether the requested fps is achievable ──
+    % open_camera (via the Python `check` command) reports RESULTING_FPS / a
+    % FPS_MISMATCH flag for the REAL roi/exposure/bin/fps. Warn + require
+    % confirmation before recording if any camera can't hit its requested fps
+    % (or the exposure is too long for it).
+    statusLabel.Text = 'Status: Checking camera settings ...';
+    drawnow;
+    mismatchMsgs = {};
+    for k = 1:numel(selected)
+        c = selected{k};
+        roiArg = '';
+        if strlength(c.roi.Value) > 0, roiArg = sprintf('--roi %s', c.roi.Value); end
+        burstArg = '';
+        if strcmp(c.trigger.Value, 'burst')
+            burstArg = sprintf('--burst %d', c.burstN.Value);
+        end
+        ckCmd = sprintf(['"%s" "%s" check --serial "%s" --name %s --trigger %s ' ...
+            '--edge %s --fps %g --exposure %g --binH %d --binV %d --pixel Mono8 %s %s'], ...
+            pyExe, pyScript, c.serial, c.name.Value, c.trigger.Value, ...
+            c.edge.Value, c.fps.Value, c.exposure.Value, ...
+            c.binH.Value, c.binV.Value, roiArg, burstArg);
+        [~, ckOut] = system(ckCmd);
+        mm = regexp(ckOut, 'FPS_MISMATCH=(\d)', 'tokens', 'once');
+        rf = regexp(ckOut, 'RESULTING_FPS=([\d.]+)', 'tokens', 'once');
+        if ~isempty(mm) && strcmp(mm{1}, '1')
+            rfv = NaN;
+            if ~isempty(rf), rfv = str2double(rf{1}); end
+            mismatchMsgs{end+1} = sprintf('%s: requested %g Hz, achievable ~%.1f Hz (exp %g us)', ...
+                c.name.Value, c.fps.Value, rfv, c.exposure.Value); %#ok<AGROW>
+        end
+    end
+    if ~isempty(mismatchMsgs)
+        msg = sprintf('%s\n', mismatchMsgs{:});
+        sel = uiconfirm(fig, sprintf(['Requested FPS not achievable:\n\n%s\n' ...
+            'Crop ROI, increase binning, or shorten exposure.\n\nProceed anyway?'], msg), ...
+            'FPS mismatch', 'Options', {'Proceed', 'Cancel'}, ...
+            'DefaultOption', 2, 'CancelOption', 2, 'Icon', 'warning');
+        if strcmp(sel, 'Cancel')
+            statusLabel.Text = 'Status: Aborted — fps mismatch (adjust ROI / bin / exposure).';
+            return;
+        end
+    end
+    statusLabel.Text = 'Status: Idle';
+
     state.runIdx = state.runIdx + 1;
     runLabel.Text = sprintf('Run: %03d', state.runIdx);
 
@@ -276,8 +327,23 @@ function onRecord()
         camArgs = sprintf('%s %s', camArgs, buildCamArgs(selected{k}, k));
     end
 
-    cmd = sprintf('"%s" "%s" acquire --saveDir "%s" --split-gap %g --single-run %s', ...
-        pyExe, pyScript, saveDirField.Value, splitGapField.Value, camArgs);
+    % Is any selected camera triggered?  Triggered sessions arm and split on
+    % trigger gaps (--single-run).  A pure free-run session has no gaps, so it
+    % needs an explicit duration (--session = Free-run dur); it then records
+    % one continuous file of that length (or until Stop).
+    anyTrig = false;
+    for kk = 1:numel(selected)
+        if ~strcmp(selected{kk}.trigger.Value, 'freerun'), anyTrig = true; end
+    end
+
+    if anyTrig
+        cmd = sprintf('"%s" "%s" acquire --saveDir "%s" --split-gap %g --single-run %s', ...
+            pyExe, pyScript, saveDirField.Value, splitGapField.Value, camArgs);
+    else
+        cmd = sprintf('"%s" "%s" acquire --saveDir "%s" --session %g --split-gap %g %s', ...
+            pyExe, pyScript, saveDirField.Value, freerunDurField.Value, ...
+            splitGapField.Value, camArgs);
+    end
 
     % Lock controls
     setControlsEnabled(false);
@@ -286,10 +352,17 @@ function onRecord()
     state.pidSeen = false;
     state.pid = "";
     if isfile(state.pidFile), delete(state.pidFile); end
-    statusLabel.Text = 'Status: Armed — waiting for triggers on Line3 ...';
-    if c1.enable.Value, c1.statusLabel.Text = 'Armed'; end
-    if c2.enable.Value, c2.statusLabel.Text = 'Armed'; end
-    if c3.enable.Value, c3.statusLabel.Text = 'Armed'; end
+    if anyTrig
+        statusLabel.Text = 'Status: Armed — waiting for triggers on Line3 ...';
+        camMsg = 'Armed';
+    else
+        statusLabel.Text = sprintf('Status: Recording (free-run) for %g s — or click Stop.', ...
+            freerunDurField.Value);
+        camMsg = 'Free-run';
+    end
+    if c1.enable.Value, c1.statusLabel.Text = camMsg; end
+    if c2.enable.Value, c2.statusLabel.Text = camMsg; end
+    if c3.enable.Value, c3.statusLabel.Text = camMsg; end
     drawnow;
 
     % Launch Python in a new console window (returns immediately).

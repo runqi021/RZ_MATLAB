@@ -15,14 +15,16 @@
 clear; clc;
 
 %% ---------------- USER PATHS ----------------
-SAM_mat  = "E:\RZ\data\shi\260115_homo_cal590\test\fov2_-200_L_30lp\fov2_-200_L_30lp_1100nm_5x_00003_MC_cpSAM_output.mat";
-movieTif = "E:\RZ\data\shi\260115_homo_cal590\test\fov2_-200_L_30lp\fov2_-200_L_30lp_1100nm_5x_00003_MC.tif";
+ioDir    = "C:\Users\Admin\Desktop\ChAT_analysis\0124\IO\roi3_R_-1000_140_2x_34lp_512x256_00001";
+ioStem   = "roi3_R_-1000_140_2x_34lp_512x256_00001_ch1_preproc_MC_MC";
+SAM_mat  = fullfile(ioDir, ioStem + "_cpSAM_output.mat");
+movieTif = fullfile(ioDir, ioStem + ".tif");
 
-maskTif  = "E:\RZ\data\shi\260115_homo_cal590\test\fov2_-200_L_30lp\fov2_-200_L_30lp_1100nm_5x_00003_MC_AVG_for_CP_cp_masks.tif";
-maskNpy  = "E:\RZ\data\shi\260115_homo_cal590\test\fov2_-200_L_30lp\fov2_-200_L_30lp_1100nm_5x_00003_MC_AVG_for_CP_seg.npy"; % optional fallback
+maskTif  = fullfile(ioDir, ioStem + "_AVG_for_CP_cp_masks.tif");
+maskNpy  = fullfile(ioDir, ioStem + "_AVG_for_CP_seg.npy"); % optional fallback
 
 % selected ROI IDs (ORIGINAL labels in CP mask + columns in SAM F)
-n_sel = [2, 3, 4, 5, 6, 7, 9, 11, 12, 13, 14, 15, 21, 22, 23, 24, 25, 26, 27];
+n_sel = [7, 8, 9, 12, 13, 14, 15, 17, 18, 19, 23, 22, 25, 26, 30, 29, 28, 31, 32, 34];
 
 % acquisition
 fps = 30;

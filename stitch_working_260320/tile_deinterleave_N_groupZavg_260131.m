@@ -18,12 +18,12 @@ function deinterleave_and_avgz_all_files()
 % ------------------------------------------------------------
 
 %% ========================= USER SETTINGS =========================
-rawDir = "D:\RUNQI\260319_shiver_cal-590_enblock";
+rawDir = "C:\Users\Admin\Desktop\260114_homo_cy5\map";
 
 % Channel IDs from SI.hChannels.channelSave
 %   Two-channel:  channels = [1 3]
 %   Single-channel: channels = 1   (or 3, etc.)
-channels = 2; %[2];
+channels = 3; %[2];
 
 recursive   = false;   % true if your tiles are in subfolders
 strictMeta  = true;    % require pages == nCh*nZ*nT

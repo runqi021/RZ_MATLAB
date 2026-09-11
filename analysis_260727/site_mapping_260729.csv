@@ -1,0 +1,55 @@
+genotype,date,site,recording,has_spikes,has_triggers,n_rois,n_active,n_analysis,n_events,note,source_path
+Sert,721,,ro1_2x_x1018y1130_18lp_3000f_00001,1,1,44,6,6,308,"EXCLUDED: different stage zero reference (see coh_cfg_260727)",E:\260721_Sert_soma_G8s\phys\baseline\ro1_2x_x1018y1130_18lp_3000f_00001
+Sert,721,cell1,ro1_2x_x1018y1130_z10_20lp_6000f_00001,1,1,44,5,5,361,"",E:\260721_Sert_soma_G8s\phys\baseline\ro1_2x_x1018y1130_z10_20lp_6000f_00001
+Sert,721,cell1,ro1_2x_x1018y1130_z15_20lp_6000f_00001,1,1,49,8,7,398,"",E:\260721_Sert_soma_G8s\phys\baseline\ro1_2x_x1018y1130_z15_20lp_6000f_00001
+Sert,721,cell1,ro1_2x_x1018y1130_z25_26lp_6000f_00001,1,1,33,5,3,192,"",E:\260721_Sert_soma_G8s\phys\baseline\ro1_2x_x1018y1130_z25_26lp_6000f_00001
+Sert,721,cell3,ro3_2.5x_x450y1500_z-15_28.5lp_6000f_00003,1,1,26,3,2,230,"",E:\260721_Sert_soma_G8s\phys\baseline\ro3_2.5x_x450y1500_z-15_28.5lp_6000f_00003
+Sert,721,cell3,ro3_4x_x700y-1233_z-10_24.5lp_6000f_00001,1,1,27,6,5,390,"",E:\260721_Sert_soma_G8s\phys\baseline\ro3_4x_x700y-1233_z-10_24.5lp_6000f_00001
+Sert,721,cell4,ro4_7x_x0y400_z0_36.5lp_3000f_00001,1,1,1,1,1,85,"",E:\260721_Sert_soma_G8s\phys\baseline\ro4_7x_x0y400_z0_36.5lp_3000f_00001
+Sert,721,cell5,ro5_1.6x_x1200y-400_z0_26lp_6000f_00001,1,1,76,12,6,408,"",E:\260721_Sert_soma_G8s\phys\baseline\ro5_1.6x_x1200y-400_z0_26lp_6000f_00001
+Sert,721,cell6,ro6_1.6x_x1200y-700_z0_26lp_6000f_00001,1,1,49,3,3,292,"",E:\260721_Sert_soma_G8s\phys\baseline\ro6_1.6x_x1200y-700_z0_26lp_6000f_00001
+Sert,721,cell7,ro7_1.6x_x1000y-1000_z0_26lp_6000f_00001,1,1,49,4,2,110,"",E:\260721_Sert_soma_G8s\phys\baseline\ro7_1.6x_x1000y-1000_z0_26lp_6000f_00001
+Sert,721,,ro8_2.3x_x-500-1500_z0_27lp_6000f_00001,0,1,NaN,NaN,NaN,NaN,"EXCLUDED: no ca_spike_data yet, so no active cells",E:\260721_Sert_soma_G8s\phys\baseline\ro8_2.3x_x-500-1500_z0_27lp_6000f_00001
+Sert,721,cell7,roi7_1.8x_x-1000-1000_z0_16lp_3000f_00001,1,1,48,10,7,339,"",E:\260721_Sert_soma_G8s\phys\baseline\roi7_1.8x_x-1000-1000_z0_16lp_3000f_00001
+Vglut2,728,,MAO_right_2x_y500x800_z20_3000f_17lp_00001,0,1,NaN,NaN,NaN,NaN,"EXCLUDED: MAO is part of IO, not a pFN site",E:\260728_vglut2_soma-g8s\phys\MAO_right_2x_y500x800_z20_3000f_17lp_00001
+Vglut2,728,,MAO_right_2x_y500x800_z20_3000f_17lp_00002,0,1,NaN,NaN,NaN,NaN,"EXCLUDED: MAO is part of IO, not a pFN site",E:\260728_vglut2_soma-g8s\phys\MAO_right_2x_y500x800_z20_3000f_17lp_00002
+Vglut2,728,,MAO_right_2x_y500x800_z20_3000f_17lp_00003,1,1,61,0,0,1,"EXCLUDED: MAO is part of IO, not a pFN site",E:\260728_vglut2_soma-g8s\phys\MAO_right_2x_y500x800_z20_3000f_17lp_00003
+Vglut2,728,,fov1_1.7x_y1650x1320_z30_3000f_15lp_00001,0,1,NaN,NaN,NaN,NaN,"EXCLUDED: no ca_spike_data yet, so no active cells",E:\260728_vglut2_soma-g8s\phys\fov1_1.7x_y1650x1320_z30_3000f_15lp_00001
+Vglut2,728,,fov1_1.7x_y1650x1320_z35_3000f_15lp_00001,1,1,50,0,0,0,"EXCLUDED: 0 active ROIs (>5 events)",E:\260728_vglut2_soma-g8s\phys\fov1_1.7x_y1650x1320_z35_3000f_15lp_00001
+Vglut2,728,,fov1_1.7x_y1650x1320_z40_3000f_17lp_00001,0,1,NaN,NaN,NaN,NaN,"EXCLUDED: no ca_spike_data yet, so no active cells",E:\260728_vglut2_soma-g8s\phys\fov1_1.7x_y1650x1320_z40_3000f_17lp_00001
+Vglut2,728,,fov1_2.1x_y1350x1310_z30_3000f_13lp_00001,0,1,NaN,NaN,NaN,NaN,"EXCLUDED: no ca_spike_data yet, so no active cells",E:\260728_vglut2_soma-g8s\phys\fov1_2.1x_y1350x1310_z30_3000f_13lp_00001
+Vglut2,728,,fov1_2x_y1700x1350_z0_6000f_15.5lp_00001,0,1,NaN,NaN,NaN,NaN,"EXCLUDED: no ca_spike_data yet, so no active cells",E:\260728_vglut2_soma-g8s\phys\fov1_2x_y1700x1350_z0_6000f_15.5lp_00001
+Vglut2,728,,fov1_2x_y1700x1350_z15_6000f_16lp_00001,0,1,NaN,NaN,NaN,NaN,"EXCLUDED: no ca_spike_data yet, so no active cells",E:\260728_vglut2_soma-g8s\phys\fov1_2x_y1700x1350_z15_6000f_16lp_00001
+Vglut2,728,,fov1_2x_y1700x1350_z15_6000f_17.5lp_00001,0,1,NaN,NaN,NaN,NaN,"EXCLUDED: no ca_spike_data yet, so no active cells",E:\260728_vglut2_soma-g8s\phys\fov1_2x_y1700x1350_z15_6000f_17.5lp_00001
+Vglut2,728,,fov1_2x_y1700x1350_z25_3000f_16lp_00001,0,1,NaN,NaN,NaN,NaN,"EXCLUDED: no ca_spike_data yet, so no active cells",E:\260728_vglut2_soma-g8s\phys\fov1_2x_y1700x1350_z25_3000f_16lp_00001
+Vglut2,728,,fov1_2x_y1700x1350_z5_6000f_15.5lp_00001,0,1,NaN,NaN,NaN,NaN,"EXCLUDED: no ca_spike_data yet, so no active cells",E:\260728_vglut2_soma-g8s\phys\fov1_2x_y1700x1350_z5_6000f_15.5lp_00001
+Vglut2,728,,fov1_2x_y1700x1350_z5_6000f_15.5lp_00002,0,1,NaN,NaN,NaN,NaN,"EXCLUDED: no ca_spike_data yet, so no active cells",E:\260728_vglut2_soma-g8s\phys\fov1_2x_y1700x1350_z5_6000f_15.5lp_00002
+Vglut2,728,cell1,fov1_5x_y1900x1320_z60_6000f_17lp_00001,1,1,2,1,1,148,"",E:\260728_vglut2_soma-g8s\phys\fov1_5x_y1900x1320_z60_6000f_17lp_00001
+Vglut2,728,,roi2_1.6x_y1400x1600_z5_3000f_16lp_00001,0,1,NaN,NaN,NaN,NaN,"EXCLUDED: no ca_spike_data yet, so no active cells",E:\260728_vglut2_soma-g8s\phys\roi2_1.6x_y1400x1600_z5_3000f_16lp_00001
+Vglut2,728,,roi2_2.5x_y1100x1700_z-25_3000f_17lp_00001,1,1,30,0,0,0,"EXCLUDED: 0 active ROIs (>5 events)",E:\260728_vglut2_soma-g8s\phys\roi2_2.5x_y1100x1700_z-25_3000f_17lp_00001
+Vglut2,728,,roi2_2x_y1400x1550_z0_3000f_15lp_00001,0,1,NaN,NaN,NaN,NaN,"EXCLUDED: no ca_spike_data yet, so no active cells",E:\260728_vglut2_soma-g8s\phys\roi2_2x_y1400x1550_z0_3000f_15lp_00001
+Vglut2,728,cell2,roi2_4x_y2000x1400_z-15_6000f_17.5lp_00001,1,1,6,1,1,324,"",E:\260728_vglut2_soma-g8s\phys\roi2_4x_y2000x1400_z-15_6000f_17.5lp_00001
+Vglut2,728,cell2,roi2_4x_y2000x1400_z-20_6000f_21lp_00001,1,1,6,1,1,166,"",E:\260728_vglut2_soma-g8s\phys\roi2_4x_y2000x1400_z-20_6000f_21lp_00001
+Vgat,730,,roi1_1.2x_x1100y1050_z0_5000f_14lp_00001,0,1,NaN,NaN,NaN,NaN,"EXCLUDED: no ca_spike_data yet, so no active cells",D:\260730_vgat-g8m_shiverer\phys\roi1_1.2x_x1100y1050_z0_5000f_14lp_00001
+Vgat,730,cell1,roi1_1.4x_x1100y1050_z6_5000f_13lp_00001,1,1,18,2,2,329,"",D:\260730_vgat-g8m_shiverer\phys\roi1_1.4x_x1100y1050_z6_5000f_13lp_00001
+Vgat,730,,roi1_1.5x_x1050y1000_z100_3000f_26.5lp_00001,0,1,NaN,NaN,NaN,NaN,"EXCLUDED: no ca_spike_data yet, so no active cells",D:\260730_vgat-g8m_shiverer\phys\roi1_1.5x_x1050y1000_z100_3000f_26.5lp_00001
+Vgat,730,cell1,roi1_1.6x_x1050y1000_z100_3000f_17.5lp_00001,1,1,76,1,1,38,"",D:\260730_vgat-g8m_shiverer\phys\roi1_1.6x_x1050y1000_z100_3000f_17.5lp_00001
+Vgat,730,,roi1_2.4x_x1000y1000_z320_3000f_32lp_00001,0,1,NaN,NaN,NaN,NaN,"EXCLUDED: no ca_spike_data yet, so no active cells",D:\260730_vgat-g8m_shiverer\phys\roi1_2.4x_x1000y1000_z320_3000f_32lp_00001
+Vgat,730,cell2,roi1_2.4x_x1300y900_z250_3000f_30lp_00001,1,1,46,1,1,46,"",D:\260730_vgat-g8m_shiverer\phys\roi1_2.4x_x1300y900_z250_3000f_30lp_00001
+Vgat,730,,roi1_2.4x_x950y1000_z85_6000f_14.5lp_00001,0,1,NaN,NaN,NaN,NaN,"EXCLUDED: no ca_spike_data yet, so no active cells",D:\260730_vgat-g8m_shiverer\phys\roi1_2.4x_x950y1000_z85_6000f_14.5lp_00001
+Vgat,730,cell1,roi1_2x_x1100y950_z13_6000f_13lp_00001,1,1,24,3,3,366,"",D:\260730_vgat-g8m_shiverer\phys\roi1_2x_x1100y950_z13_6000f_13lp_00001
+Vgat,730,cell1,roi1_3.2x_x1100y1050_z6_6000f_12lp_00001,1,1,8,1,1,312,"",D:\260730_vgat-g8m_shiverer\phys\roi1_3.2x_x1100y1050_z6_6000f_12lp_00001
+Vgat,730,,roi1_3x_x1050y1000_z100_3000f_17lp_00001,0,1,NaN,NaN,NaN,NaN,"EXCLUDED: no ca_spike_data yet, so no active cells",D:\260730_vgat-g8m_shiverer\phys\roi1_3x_x1050y1000_z100_3000f_17lp_00001
+Vgat,730,,roi1_3x_x1100y950_z8_3000f_11.5lp_00001,0,1,NaN,NaN,NaN,NaN,"EXCLUDED: no ca_spike_data yet, so no active cells",D:\260730_vgat-g8m_shiverer\phys\roi1_3x_x1100y950_z8_3000f_11.5lp_00001
+Vgat,730,cell1,roi1_3x_x1100y950_z8_6000f_13lp_00001,1,1,16,1,1,110,"",D:\260730_vgat-g8m_shiverer\phys\roi1_3x_x1100y950_z8_6000f_13lp_00001
+Vgat,730,cell2,roi1_3x_x1350y850_z265_3000f_31lp_00001,1,1,35,3,3,195,"",D:\260730_vgat-g8m_shiverer\phys\roi1_3x_x1350y850_z265_3000f_31lp_00001
+Vgat,730,,roi1_3x_x950y1000_z70_6000f_15lp_00001,1,1,36,0,0,0,"EXCLUDED: 0 active ROIs (>5 events)",D:\260730_vgat-g8m_shiverer\phys\roi1_3x_x950y1000_z70_6000f_15lp_00001
+Vgat,730,cell3,roi1_3x_x950y1200_z40_6000f_14lp_00001,1,1,19,1,0,15,"",D:\260730_vgat-g8m_shiverer\phys\roi1_3x_x950y1200_z40_6000f_14lp_00001
+Vgat,730,cell3,roi1_3x_x950y1200_z40_6000f_14lp_00002,1,1,17,1,0,18,"",D:\260730_vgat-g8m_shiverer\phys\roi1_3x_x950y1200_z40_6000f_14lp_00002
+Vgat,730,,roi2_1.5x_x1050y2250_z35_2000f_8lp_00001,0,0,NaN,NaN,NaN,NaN,"EXCLUDED: no breath triggers (breath_svd_pc1 + GUIs not run)",D:\260730_vgat-g8m_shiverer\phys\roi2_1.5x_x1050y2250_z35_2000f_8lp_00001
+Vgat,730,,roi2_1.6x_x1050y2250_z50_2000f_10.5lp_00001,0,0,NaN,NaN,NaN,NaN,"EXCLUDED: no breath triggers (breath_svd_pc1 + GUIs not run)",D:\260730_vgat-g8m_shiverer\phys\roi2_1.6x_x1050y2250_z50_2000f_10.5lp_00001
+Vgat,730,,roi2_1.6x_x1050y2250_z63_2000f_11.5lp_00001,0,0,NaN,NaN,NaN,NaN,"EXCLUDED: no breath triggers (breath_svd_pc1 + GUIs not run)",D:\260730_vgat-g8m_shiverer\phys\roi2_1.6x_x1050y2250_z63_2000f_11.5lp_00001
+Vgat,730,,roi2_2.2x_x1050y2250_z100_2000f_12lp_00001,0,0,NaN,NaN,NaN,NaN,"EXCLUDED: no breath triggers (breath_svd_pc1 + GUIs not run)",D:\260730_vgat-g8m_shiverer\phys\roi2_2.2x_x1050y2250_z100_2000f_12lp_00001
+Vgat,730,,roi2_2.2x_x1050y2250_z80_2000f_11.5lp_00001,0,0,NaN,NaN,NaN,NaN,"EXCLUDED: no breath triggers (breath_svd_pc1 + GUIs not run)",D:\260730_vgat-g8m_shiverer\phys\roi2_2.2x_x1050y2250_z80_2000f_11.5lp_00001
+Vgat,730,,roi2_2x_x1050y2250_z120_2000f_14lp_00001,0,0,NaN,NaN,NaN,NaN,"EXCLUDED: no breath triggers (breath_svd_pc1 + GUIs not run)",D:\260730_vgat-g8m_shiverer\phys\roi2_2x_x1050y2250_z120_2000f_14lp_00001
+Vgat,730,,roi2_2x_x1050y2250_z160_2000f_16lp_00001,0,0,NaN,NaN,NaN,NaN,"EXCLUDED: no breath triggers (breath_svd_pc1 + GUIs not run)",D:\260730_vgat-g8m_shiverer\phys\roi2_2x_x1050y2250_z160_2000f_16lp_00001

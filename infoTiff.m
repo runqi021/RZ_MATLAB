@@ -1,6 +1,6 @@
 %loadtiff("D:\RUNQI\260224_vglut2_soma_g8s\phys\processed\breathing\pFN_roi2_z0_25x_512x512_3x_2000f_00001\pFN_roi2_z0_25x_512x512_3x_2000f_00001.tif");
 
-fn = "Z:\p1yao\RZ\in vivo\sert_soma_g8s_retake\sert_soma_G8s_map_1.2x_50f_col01_row01_x-751_y301_00001.tif";
+fn = "C:\260806_sst-soma-g8s\phys\roi1_3x_z9_14lp_6000f_00001\roi1_3x_z9_14lp_6000f_00001.tif";
 info = imfinfo(fn);
 
 info(2)   % look at first frame

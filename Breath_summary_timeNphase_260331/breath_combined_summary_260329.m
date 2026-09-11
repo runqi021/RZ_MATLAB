@@ -46,7 +46,8 @@ TW              = 4;              % multitaper time-bandwidth (K = 2*TW-1 tapers
 f_breath_search = [1 3];     % Hz (search band for breathing peak; FWHM narrows for coherence)
 fwhm_factor     = 1.5;           % coherence band = fwhm_factor x FWHM (centered on peak)
 BaselineWinSec  = 20;            % dF/F sliding median baseline window (seconds)
-prcLim          = [0.1 99.9];    % percentile clamp for dF/F heatmap
+prcLim          = [5 99.5];    % percentile clamp for dF/F heatmap
+climManual      = [];            % [] = use prcLim percentiles; [lo hi] = force these color limits (e.g. [0 0.5])
 nPhaseBins      = 200;            % bins for phase-normalized breath cycles
 coherence_use_spike = true;      % true = coherence on spike train, false = on dF/F waveform
 win_sec         = 0.5;            % half-window for peak-trig avg (seconds around breath peak)
@@ -855,6 +856,17 @@ col6_x  = col5_x  + sq_w + hgap;
 col7_x  = col6_x  + sq_w + hgap;
 col8_x  = col7_x  + sq_w + hgap;   % spectra
 
+% Global dF/F color limits shared by ALL heatmaps (time + phase).
+% climManual = [] -> percentile clamp (prcLim, two-sided, no manual floor);
+% climManual = [lo hi] -> force those limits (e.g. [0 0.5] to floor at 0).
+% sig/nsig are row-subsets of the "all" matrices, so [all] spans the full range.
+if isempty(climManual)
+    gclim = prctile([big_mat_all(:); ph_big_all(:)], prcLim);
+    if ~(gclim(2) > gclim(1)), gclim = [min(big_mat_all(:)) max(big_mat_all(:))]; end
+else
+    gclim = climManual;
+end
+
 fig = figure('Color', 'w', 'Name', 'Breath Combined Summary', ...
     'Units', 'centimeters', 'Position', [0.5 0.5 fig_w fig_h], ...
     'PaperUnits', 'centimeters', 'PaperSize', [fig_w fig_h], ...
@@ -885,7 +897,7 @@ imagesc(ax, t_w, 1:size(big_mat_all,1), big_mat_all);
 set(ax, 'YDir','reverse');
 colormap(ax, flipud(gray(256)));
 cH = prctile(big_mat_all(:), prcLim(2));
-caxis(ax, [0, cH]);
+caxis(ax, gclim);
 % for sp = 1:numel(spk_ov_all)
 %     r = spk_ov_all(sp).row; t_spk = spk_ov_all(sp).tval;
 %     plot(ax, [t_spk t_spk], [r-0.4 r+0.4], 'b', 'LineWidth', 1.5);
@@ -909,7 +921,7 @@ if nSigROIs > 0
     set(ax, 'YDir','reverse');
     colormap(ax, flipud(gray(256)));
     cH = prctile(big_mat_sig(:), prcLim(2));
-    caxis(ax, [0, cH]);
+    caxis(ax, gclim);
     % for sp = 1:numel(spk_ov_sig)
     %     r = spk_ov_sig(sp).row; t_spk = spk_ov_sig(sp).tval;
     %     plot(ax, [t_spk t_spk], [r-0.4 r+0.4], 'b', 'LineWidth', 1.5);
@@ -937,7 +949,7 @@ if nSigROIs > 0
     set(ax, 'YDir','reverse');
     colormap(ax, flipud(gray(256)));
     cH = prctile(sorted_sig_t(:), prcLim(2));
-    caxis(ax, [0, cH]);
+    caxis(ax, gclim);
     xline(ax, 0, 'k--', 'LineWidth', 1);
     hold(ax,'off');
     xlim(ax, [t_w(1), t_w(end)]);
@@ -965,7 +977,7 @@ imagesc(ax, t_w, 1:nTotalROIs, peth_sorted_all_mat);
 set(ax, 'YDir','reverse');
 colormap(ax, flipud(gray(256)));
 cH = prctile(peth_sorted_all_mat(:), prcLim(2));
-caxis(ax, [0, cH]);
+caxis(ax, gclim);
 hold(ax,'on'); xline(ax, 0, 'k--', 'LineWidth', 1); hold(ax,'off');
 if nTotalROIs <= 40
     set(ax, 'YTick', 1:nTotalROIs, 'YTickLabel', labels_sorted_all, 'FontSize', 5);
@@ -989,7 +1001,7 @@ if nSigROIs > 0
     set(ax, 'YDir','reverse');
     colormap(ax, flipud(gray(256)));
     cH = prctile(peth_sorted_sig_mat(:), prcLim(2));
-    caxis(ax, [0, cH]);
+    caxis(ax, gclim);
     hold(ax,'on'); xline(ax, 0, 'k--', 'LineWidth', 1); hold(ax,'off');
     if nSigROIs <= 40
         set(ax, 'YTick', 1:nSigROIs, 'YTickLabel', labels_sorted_sig, 'FontSize', 5);
@@ -1034,7 +1046,7 @@ if nNonSigROIs > 0
     set(ax, 'YDir','reverse');
     colormap(ax, flipud(gray(256)));
     cH = prctile(peth_sorted_nsig_mat(:), prcLim(2));
-    caxis(ax, [0, cH]);
+    caxis(ax, gclim);
     hold(ax,'on'); xline(ax, 0, 'k--', 'LineWidth', 1); hold(ax,'off');
     if nNonSigROIs <= 40
         set(ax, 'YTick', 1:nNonSigROIs, 'YTickLabel', labels_sorted_nsig, 'FontSize', 5);
@@ -1090,7 +1102,7 @@ if nSigROIs > 0
     imagesc(ax, phase_full, 1:size(ph_big_sig_dup,1), ph_big_sig_dup);
     set(ax, 'YDir','reverse');
     colormap(ax, flipud(gray(256)));
-    caxis(ax, [0, cH]);
+    caxis(ax, gclim);
     % for sp_ = 1:numel(ph_spk_sig)
     %     r_ = ph_spk_sig(sp_).row; p_ = ph_spk_sig(sp_).phi;
     %     plot(ax, [p_ p_], [r_-0.4 r_+0.4], 'b', 'LineWidth', 1.5);
@@ -1121,7 +1133,7 @@ if nSigROIs > 0
     set(ax, 'YDir','reverse');
     colormap(ax, flipud(gray(256)));
     cH = prctile(avg_sig_dup(:), prcLim(2));
-    caxis(ax, [0, cH]);
+    caxis(ax, gclim);
     hold(ax,'on'); xline(ax, 2*pi, 'k--', 'LineWidth', 0.8); hold(ax,'off');
     set(ax, 'XTick', [0 pi 2*pi 3*pi 4*pi], ...
         'XTickLabel', {'0','\pi','2\pi','3\pi','4\pi'});
@@ -1151,7 +1163,7 @@ if nSigROIs > 0
     imagesc(ax, phase_full, 1:size(sorted_sig_ph_dup,1), sorted_sig_ph_dup);
     set(ax, 'YDir','reverse');
     colormap(ax, flipud(gray(256)));
-    caxis(ax, [0, cH]);
+    caxis(ax, gclim);
     xline(ax, 2*pi, 'k--', 'LineWidth', 0.8);
     hold(ax,'off');
     xlim(ax, [0, 4*pi]);
@@ -1180,7 +1192,7 @@ hold(ax,'on');
 imagesc(ax, phase_full, 1:size(ph_big_all_dup,1), ph_big_all_dup);
 set(ax, 'YDir','reverse');
 colormap(ax, flipud(gray(256)));
-caxis(ax, [0, cH]);
+caxis(ax, gclim);
 % for sp_ = 1:numel(ph_spk_all)
 %     r_ = ph_spk_all(sp_).row; p_ = ph_spk_all(sp_).phi;
 %     plot(ax, [p_ p_], [r_-0.4 r_+0.4], 'b', 'LineWidth', 1.5);
@@ -1206,7 +1218,7 @@ imagesc(ax, phase_full, 1:nTotalROIs, avg_all_dup);
 set(ax, 'YDir','reverse');
 colormap(ax, flipud(gray(256)));
 cH = prctile(avg_all_dup(:), prcLim(2));
-caxis(ax, [0, cH]);
+caxis(ax, gclim);
 hold(ax,'on'); xline(ax, 2*pi, 'k--', 'LineWidth', 0.8); hold(ax,'off');
 set(ax, 'XTick', [0 pi 2*pi 3*pi 4*pi], ...
     'XTickLabel', {'0','\pi','2\pi','3\pi','4\pi'});
@@ -1269,7 +1281,7 @@ if nNonSigROIs > 0
     set(ax, 'YDir','reverse');
     colormap(ax, flipud(gray(256)));
     cH = prctile(avg_nsig_dup(:), prcLim(2));
-    caxis(ax, [0, cH]);
+    caxis(ax, gclim);
     hold(ax,'on'); xline(ax, 2*pi, 'k--', 'LineWidth', 0.8); hold(ax,'off');
     set(ax, 'XTick', [0 pi 2*pi 3*pi 4*pi], ...
         'XTickLabel', {'0','\pi','2\pi','3\pi','4\pi'});
@@ -1428,7 +1440,7 @@ if nNonSigROIs > 0
     set(ax, 'YDir','reverse');
     colormap(ax, flipud(gray(256)));
     cH = prctile(big_mat_nsig(:), prcLim(2));
-    caxis(ax, [0, cH]);
+    caxis(ax, gclim);
     xline(ax, 0, 'k--', 'LineWidth', 1);
     hold(ax,'off');
     xlim(ax, [t_w(1), t_w(end)]);
@@ -1451,7 +1463,7 @@ if nNonSigROIs > 0
     set(ax, 'YDir','reverse');
     colormap(ax, flipud(gray(256)));
     cH = prctile(sorted_nsig_t(:), prcLim(2));
-    caxis(ax, [0, cH]);
+    caxis(ax, gclim);
     xline(ax, 0, 'k--', 'LineWidth', 1);
     hold(ax,'off');
     xlim(ax, [t_w(1), t_w(end)]);
@@ -1474,7 +1486,7 @@ if nNonSigROIs > 0
     imagesc(ax, phase_full, 1:size(ph_big_nsig_dup,1), ph_big_nsig_dup);
     set(ax, 'YDir','reverse');
     colormap(ax, flipud(gray(256)));
-    caxis(ax, [0, cH]);
+    caxis(ax, gclim);
     xline(ax, 2*pi, 'k--', 'LineWidth', 0.8);
     hold(ax,'off');
     xlim(ax, [0, 4*pi]);
@@ -1499,7 +1511,7 @@ if nNonSigROIs > 0
     imagesc(ax, phase_full, 1:size(sorted_nsig_ph_dup,1), sorted_nsig_ph_dup);
     set(ax, 'YDir','reverse');
     colormap(ax, flipud(gray(256)));
-    caxis(ax, [0, cH]);
+    caxis(ax, gclim);
     xline(ax, 2*pi, 'k--', 'LineWidth', 0.8);
     hold(ax,'off');
     xlim(ax, [0, 4*pi]);
@@ -1713,7 +1725,7 @@ if doSave
     outDir = fullfile(inputPath, 'breath_combined_summary');
     if ~exist(outDir, 'dir'), mkdir(outDir); end
     pdfPath = fullfile(outDir, 'breath_combined_summary.pdf');
-    exportgraphics(fig, pdfPath, 'ContentType', 'vector', 'BackgroundColor', 'none');
+    exportgraphics(fig, pdfPath, 'ContentType', 'vector', 'BackgroundColor', 'white');
     fprintf('Saved: %s\n', pdfPath);
 end
 
@@ -1823,7 +1835,7 @@ drawnow;
 
 if doSave
     cohPdfPath = fullfile(outDir, 'coherence_waveform_vs_spike.pdf');
-    exportgraphics(figCoh, cohPdfPath, 'ContentType','vector', 'BackgroundColor','none');
+    exportgraphics(figCoh, cohPdfPath, 'ContentType','vector', 'BackgroundColor','white');
     fprintf('Saved: %s\n', cohPdfPath);
 end
 
@@ -1922,7 +1934,7 @@ if nPsdSess > 0
         outDir2 = fullfile(inputPath, 'breath_combined_summary');
         if ~exist(outDir2, 'dir'), mkdir(outDir2); end
         pdfPath2 = fullfile(outDir2, 'breath_psd_per_session.pdf');
-        exportgraphics(fig2, pdfPath2, 'ContentType', 'vector', 'BackgroundColor', 'none');
+        exportgraphics(fig2, pdfPath2, 'ContentType', 'vector', 'BackgroundColor', 'white');
         fprintf('Saved: %s\n', pdfPath2);
     end
 end

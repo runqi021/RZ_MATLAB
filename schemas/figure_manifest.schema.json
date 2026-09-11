@@ -1,0 +1,350 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://local/schemas/figure_manifest.schema.json",
+  "title": "Illustrator Figure Manifest",
+  "description": "Read-only structural description of an Adobe Illustrator document produced by illustrator/analyze_document.jsx. Additional properties are permitted throughout so newer script versions can add fields without breaking validation.",
+  "type": "object",
+  "required": ["schemaVersion", "generator", "document", "layers", "statistics", "warnings"],
+  "additionalProperties": true,
+  "properties": {
+    "schemaVersion": { "type": "string" },
+    "generator": { "type": "string" },
+    "generatedAt": { "type": "string" },
+    "document": { "$ref": "#/definitions/document" },
+    "layers": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/layer" }
+    },
+    "statistics": { "$ref": "#/definitions/statistics" },
+    "warnings": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/warning" }
+    }
+  },
+
+  "definitions": {
+
+    "nullableNumber": { "type": ["number", "null"] },
+    "nullableBoolean": { "type": ["boolean", "null"] },
+    "nullableString": { "type": ["string", "null"] },
+
+    "rect": {
+      "description": "Illustrator [left, top, right, bottom] rectangle, or null when unavailable.",
+      "oneOf": [
+        { "type": "null" },
+        {
+          "type": "array",
+          "items": { "type": "number" },
+          "minItems": 4,
+          "maxItems": 4
+        }
+      ]
+    },
+
+    "point": {
+      "oneOf": [
+        { "type": "null" },
+        {
+          "type": "array",
+          "items": { "type": "number" },
+          "minItems": 2,
+          "maxItems": 2
+        }
+      ]
+    },
+
+    "color": {
+      "oneOf": [
+        { "type": "null" },
+        {
+          "type": "object",
+          "required": ["type"],
+          "additionalProperties": true,
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": ["RGBColor", "CMYKColor", "GrayColor", "LabColor",
+                       "SpotColor", "GradientColor", "PatternColor",
+                       "NoColor", "UnknownColor"]
+            },
+            "red": { "$ref": "#/definitions/nullableNumber" },
+            "green": { "$ref": "#/definitions/nullableNumber" },
+            "blue": { "$ref": "#/definitions/nullableNumber" },
+            "cyan": { "$ref": "#/definitions/nullableNumber" },
+            "magenta": { "$ref": "#/definitions/nullableNumber" },
+            "yellow": { "$ref": "#/definitions/nullableNumber" },
+            "black": { "$ref": "#/definitions/nullableNumber" },
+            "gray": { "$ref": "#/definitions/nullableNumber" },
+            "l": { "$ref": "#/definitions/nullableNumber" },
+            "a": { "$ref": "#/definitions/nullableNumber" },
+            "b": { "$ref": "#/definitions/nullableNumber" },
+            "tint": { "$ref": "#/definitions/nullableNumber" },
+            "spotName": { "$ref": "#/definitions/nullableString" },
+            "gradientName": { "$ref": "#/definitions/nullableString" },
+            "patternName": { "$ref": "#/definitions/nullableString" }
+          }
+        }
+      ]
+    },
+
+    "fileRef": {
+      "oneOf": [
+        { "type": "null" },
+        {
+          "type": "object",
+          "additionalProperties": true,
+          "properties": {
+            "fsName": { "$ref": "#/definitions/nullableString" },
+            "exists": { "$ref": "#/definitions/nullableBoolean" }
+          }
+        }
+      ]
+    },
+
+    "parentRef": {
+      "oneOf": [
+        { "type": "null" },
+        {
+          "type": "object",
+          "additionalProperties": true,
+          "properties": {
+            "kind": { "type": "string" },
+            "typename": { "type": "string" },
+            "name": { "type": "string" }
+          }
+        }
+      ]
+    },
+
+    "document": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["name", "artboards"],
+      "properties": {
+        "name": { "type": "string" },
+        "fullPath": { "$ref": "#/definitions/nullableString" },
+        "saved": { "$ref": "#/definitions/nullableBoolean" },
+        "colorSpace": { "$ref": "#/definitions/nullableString" },
+        "rulerUnits": { "$ref": "#/definitions/nullableString" },
+        "illustratorVersion": { "$ref": "#/definitions/nullableString" },
+        "buildNumber": { "$ref": "#/definitions/nullableString" },
+        "artboards": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/artboard" }
+        }
+      }
+    },
+
+    "artboard": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["index", "artboardRect"],
+      "properties": {
+        "index": { "type": "integer" },
+        "name": { "type": "string" },
+        "artboardRect": { "$ref": "#/definitions/rect" },
+        "width": { "$ref": "#/definitions/nullableNumber" },
+        "height": { "$ref": "#/definitions/nullableNumber" }
+      }
+    },
+
+    "layer": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["kind", "name", "items", "sublayers"],
+      "properties": {
+        "kind": { "type": "string", "enum": ["layer"] },
+        "name": { "type": "string" },
+        "visible": { "$ref": "#/definitions/nullableBoolean" },
+        "locked": { "$ref": "#/definitions/nullableBoolean" },
+        "opacity": { "$ref": "#/definitions/nullableNumber" },
+        "color": { "$ref": "#/definitions/color" },
+        "items": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/item" }
+        },
+        "sublayers": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/layer" }
+        }
+      }
+    },
+
+    "item": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["typename"],
+      "properties": {
+        "typename": { "type": "string" },
+        "uuid": { "$ref": "#/definitions/nullableString" },
+        "name": { "type": "string" },
+        "note": { "type": "string" },
+        "locked": { "$ref": "#/definitions/nullableBoolean" },
+        "hidden": { "$ref": "#/definitions/nullableBoolean" },
+        "editable": { "$ref": "#/definitions/nullableBoolean" },
+        "geometricBounds": { "$ref": "#/definitions/rect" },
+        "visibleBounds": { "$ref": "#/definitions/rect" },
+        "controlBounds": { "$ref": "#/definitions/rect" },
+        "position": { "$ref": "#/definitions/point" },
+        "width": { "$ref": "#/definitions/nullableNumber" },
+        "height": { "$ref": "#/definitions/nullableNumber" },
+        "rotation": { "$ref": "#/definitions/nullableNumber" },
+        "parent": { "$ref": "#/definitions/parentRef" },
+
+        "text": { "$ref": "#/definitions/textDetail" },
+        "path": { "$ref": "#/definitions/pathDetail" },
+        "raster": { "$ref": "#/definitions/rasterDetail" },
+        "placed": { "$ref": "#/definitions/placedDetail" },
+        "group": {
+          "type": "object",
+          "additionalProperties": true,
+          "properties": { "clipped": { "$ref": "#/definitions/nullableBoolean" } }
+        },
+        "compound": {
+          "type": "object",
+          "additionalProperties": true,
+          "properties": { "closed": { "$ref": "#/definitions/nullableNumber" } }
+        },
+        "children": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/item" }
+        }
+      }
+    },
+
+    "textDetail": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "contents": { "type": "string" },
+        "kind": { "$ref": "#/definitions/nullableString" },
+        "orientation": { "$ref": "#/definitions/nullableString" },
+        "characterCount": { "$ref": "#/definitions/nullableNumber" },
+        "paragraphs": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "index": { "type": "integer" },
+              "justification": { "$ref": "#/definitions/nullableString" }
+            }
+          }
+        },
+        "runs": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/textRun" }
+        }
+      }
+    },
+
+    "textRun": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "text": { "type": "string" },
+        "length": { "type": "integer" },
+        "font": {
+          "type": "object",
+          "additionalProperties": true,
+          "properties": {
+            "name": { "$ref": "#/definitions/nullableString" },
+            "family": { "$ref": "#/definitions/nullableString" },
+            "style": { "$ref": "#/definitions/nullableString" }
+          }
+        },
+        "size": { "$ref": "#/definitions/nullableNumber" },
+        "baselineShift": { "$ref": "#/definitions/nullableNumber" },
+        "horizontalScale": { "$ref": "#/definitions/nullableNumber" },
+        "verticalScale": { "$ref": "#/definitions/nullableNumber" },
+        "tracking": { "$ref": "#/definitions/nullableNumber" },
+        "capitalization": { "$ref": "#/definitions/nullableString" },
+        "fillColor": { "$ref": "#/definitions/color" },
+        "strokeColor": { "$ref": "#/definitions/color" }
+      }
+    },
+
+    "pathDetail": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "closed": { "$ref": "#/definitions/nullableBoolean" },
+        "filled": { "$ref": "#/definitions/nullableBoolean" },
+        "stroked": { "$ref": "#/definitions/nullableBoolean" },
+        "clipping": { "$ref": "#/definitions/nullableBoolean" },
+        "strokeWidth": { "$ref": "#/definitions/nullableNumber" },
+        "pathPointCount": { "$ref": "#/definitions/nullableNumber" },
+        "fillColor": { "$ref": "#/definitions/color" },
+        "strokeColor": { "$ref": "#/definitions/color" }
+      }
+    },
+
+    "rasterDetail": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "embedded": { "$ref": "#/definitions/nullableBoolean" },
+        "linked": { "$ref": "#/definitions/nullableBoolean" },
+        "file": { "$ref": "#/definitions/fileRef" },
+        "effectiveBounds": { "$ref": "#/definitions/rect" }
+      }
+    },
+
+    "placedDetail": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "embedded": { "$ref": "#/definitions/nullableBoolean" },
+        "linked": { "$ref": "#/definitions/nullableBoolean" },
+        "file": { "$ref": "#/definitions/fileRef" },
+        "effectiveBounds": { "$ref": "#/definitions/rect" }
+      }
+    },
+
+    "statistics": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["totalItems", "itemsByType", "fonts"],
+      "properties": {
+        "totalItems": { "type": "integer" },
+        "maxNestingDepth": { "type": "integer" },
+        "warningCount": { "type": "integer" },
+        "itemsByType": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "typename": { "type": "string" },
+              "count": { "type": "integer" }
+            }
+          }
+        },
+        "fonts": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "name": { "type": "string" },
+              "family": { "type": "string" },
+              "style": { "type": "string" },
+              "characters": { "type": "integer" },
+              "runs": { "type": "integer" }
+            }
+          }
+        }
+      }
+    },
+
+    "warning": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["context", "message"],
+      "properties": {
+        "context": { "type": "string" },
+        "message": { "type": "string" }
+      }
+    }
+  }
+}

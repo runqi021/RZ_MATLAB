@@ -1,0 +1,2 @@
+near_xy_um,near_z_um,n_near,n_far,median_near,median_far,fixed_thr,frac_near_above,frac_far_above,calibrated_thr,sensitivity,AUC
+5,15,867,15423,0.826688444730997,0.232297194318648,0.5,0.937716262975779,0.148998249367827,0.73768746964486,0.686274509803922,0.969561031731021

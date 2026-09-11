@@ -26,6 +26,8 @@ import sys
 import time
 import threading
 import queue
+import shutil
+import subprocess
 from datetime import datetime
 
 import numpy as np
@@ -36,6 +38,112 @@ try:
     HAS_CV2 = True
 except ImportError:
     HAS_CV2 = False
+
+
+# ── Video writer ───────────────────────────────────────────────────────────
+# ffmpeg.exe location: PATH, or override with the BASLER_FFMPEG env var.
+FFMPEG_EXE = os.environ.get("BASLER_FFMPEG") or shutil.which("ffmpeg")
+_WRITER_ANNOUNCED = [False]
+
+
+class FrameWriter:
+    """Lossless AVI writer for one run.
+
+    Prefers a MULTITHREADED ffmpeg FFV1 pipe: raw frames are piped to an
+    ffmpeg subprocess that encodes FFV1 across ALL CPU cores (-threads 0,
+    -slices 24).  This keeps up with high-fps cameras in real time, so there
+    is no post-stop encode backlog (the old single-thread cv2.VideoWriter
+    encoded at ~25 MB/s and fell minutes behind at 200 Hz).
+
+    Falls back to single-threaded cv2.VideoWriter(FFV1) if ffmpeg is not
+    found, so acquisition never fails just because ffmpeg is missing.
+
+    Output is identical lossless FFV1 either way (still read via cv2 / DLC;
+    transcode to mp4 if you need to scrub it in a player / ImageJ).
+    """
+
+    def __init__(self, path, h, w, fps, sample, slices=24, threads=0):
+        self.path = path
+        self.proc = None
+        self.vw = None
+        self.mode = None
+        self.broken = False
+
+        if sample.ndim == 3:
+            pix = "bgr24"
+        elif sample.dtype == np.uint16:
+            pix = "gray16le"
+        else:
+            pix = "gray"
+        rate = f"{max(float(fps), 1.0):g}"
+
+        if FFMPEG_EXE is not None:
+            cmd = [FFMPEG_EXE, "-y", "-hide_banner", "-loglevel", "error",
+                   "-f", "rawvideo", "-pix_fmt", pix,
+                   "-s", f"{w}x{h}", "-r", rate, "-i", "-", "-an",
+                   "-c:v", "ffv1", "-level", "3", "-coder", "1", "-context", "1",
+                   "-g", "1", "-slices", str(slices), "-slicecrc", "1",
+                   "-threads", str(threads), path]
+            try:
+                self.proc = subprocess.Popen(
+                    cmd, stdin=subprocess.PIPE,
+                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                self.mode = "ffmpeg"
+            except Exception as e:
+                print(f"[writer] ffmpeg launch failed ({e}); using cv2 fallback")
+                self.proc = None
+
+        if self.proc is None:
+            if not HAS_CV2:
+                raise RuntimeError("No ffmpeg and no cv2 available to write video.")
+            self.vw = cv2.VideoWriter(path, cv2.VideoWriter_fourcc(*"FFV1"),
+                                      float(max(fps, 1.0)), (w, h), sample.ndim == 3)
+            if not self.vw.isOpened():
+                raise RuntimeError(
+                    f"cv2.VideoWriter failed to open {path} with FFV1 "
+                    "(no ffmpeg on PATH and OpenCV lacks FFV1 support).")
+            self.mode = "cv2"
+
+        if not _WRITER_ANNOUNCED[0]:
+            if self.mode == "ffmpeg":
+                print(f"[writer] ffmpeg FFV1 multithreaded "
+                      f"(threads={threads or 'auto'}, slices={slices})  [{FFMPEG_EXE}]")
+            else:
+                print("[writer] cv2 FFV1 single-thread fallback — ffmpeg not found "
+                      "(expect slow saves; put ffmpeg.exe on PATH or set BASLER_FFMPEG)")
+            _WRITER_ANNOUNCED[0] = True
+
+    def write(self, frame):
+        if self.mode == "ffmpeg":
+            if self.broken:
+                return
+            try:
+                self.proc.stdin.write(np.ascontiguousarray(frame).tobytes())
+            except (BrokenPipeError, ValueError, OSError) as e:
+                self.broken = True
+                print(f"[writer] WARNING: ffmpeg pipe broke for "
+                      f"{os.path.basename(self.path)} ({e}); remaining frames dropped")
+        else:
+            self.vw.write(frame)
+
+    def close(self):
+        if self.mode == "ffmpeg" and self.proc is not None:
+            try:
+                if self.proc.stdin and not self.proc.stdin.closed:
+                    self.proc.stdin.close()
+            except Exception:
+                pass
+            try:
+                self.proc.wait(timeout=600)
+            except Exception:
+                try:
+                    self.proc.kill()
+                except Exception:
+                    pass
+            self.proc = None
+        elif self.vw is not None:
+            self.vw.release()
+            self.vw = None
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────
@@ -249,18 +357,45 @@ def open_camera(device_info, name, trigger, fps, pixel, bin_h, bin_v,
     exp_ms = cam.ExposureTime.Value / 1000
     print(f"[{name}] {w}x{h}  bin={bin_h}x{bin_v}  exp={exp_ms:.1f} ms")
 
-    # Report actual achievable frame rate vs requested
+    # Report actual achievable frame rate vs requested, and WARN on any
+    # fps/exposure mismatch (ALL trigger modes — not just burst).  The camera
+    # computes ResultingFrameRate from the current ROI, exposure, pixel format
+    # and link bandwidth, so it is the ground truth for "can we hit *fps*?".
+    # Machine-readable tokens (RESULTING_FPS=, FPS_MISMATCH=) are parsed by the
+    # MATLAB GUI / n-runs preflight to warn before recording.
     try:
         actual_fps = cam.ResultingFrameRate.Value
-        print(f"[{name}] Max achievable FPS: {actual_fps:.1f} Hz"
-              f"  (requested: {fps} Hz)")
-        if trigger == "burst" and actual_fps < fps * 0.95:
+    except Exception:
+        actual_fps = 0.0
+    try:
+        exp_now = cam.ExposureTime.Value
+    except Exception:
+        exp_now = 0.0
+    print(f"[{name}] RESULTING_FPS={actual_fps:.3f} REQUESTED_FPS={float(fps):.3f} "
+          f"EXPOSURE_US={exp_now:.1f}")
+    print(f"[{name}] Max achievable FPS: {actual_fps:.1f} Hz  (requested: {fps} Hz)")
+
+    mismatch = False
+    # (1) Exposure longer than the frame period caps the rate at 1/exposure.
+    if fps > 0 and exp_now > 0:
+        fps_from_exp = 1e6 / exp_now
+        if fps_from_exp < float(fps) * 0.98:
+            mismatch = True
+            print(f"[{name}] WARNING: exposure {exp_now/1000:.2f} ms caps frame rate at "
+                  f"{fps_from_exp:.1f} Hz < requested {fps} Hz — shorten exposure.")
+    # (2) ROI / bandwidth / exposure combined can't reach the requested rate.
+    if fps > 0 and actual_fps > 0 and actual_fps < float(fps) * 0.98:
+        mismatch = True
+        if trigger == "burst":
             burst_dur_ms = (burst_count - 1) / actual_fps * 1000
             print(f"[{name}] WARNING: camera caps at {actual_fps:.0f} Hz, "
                   f"burst of {burst_count} will take {burst_dur_ms:.1f} ms — "
-                  f"need ROI crop or more binning for {fps} Hz")
-    except Exception:
-        pass
+                  f"crop ROI or bin more for {fps} Hz")
+        else:
+            print(f"[{name}] WARNING: requested {fps} Hz NOT achievable — camera will run "
+                  f"at ~{actual_fps:.1f} Hz (limited by ROI / exposure / bandwidth). "
+                  f"Crop ROI, increase binning, or shorten exposure.")
+    print(f"[{name}] FPS_MISMATCH={1 if mismatch else 0}")
 
     # Diagnostic: report instantaneous Line3 state + active trigger selectors.
     # If Line3 reads the same value for 2+ seconds while 2P is triggering,
@@ -342,21 +477,14 @@ def acquire_camera_session(cam, name, save_dir, session_s, fps_hint, trigger,
                 break
             if item == "CLOSE":   # close current AVI
                 if vw[0] is not None:
-                    vw[0].release()
+                    vw[0].close()
                     vw[0] = None
                 write_q.task_done()
                 continue
             avi_path, frame_data = item
             if vw[0] is None:
                 h, w = frame_data.shape[:2]
-                vw[0] = cv2.VideoWriter(avi_path, cv2.VideoWriter_fourcc(*"FFV1"),
-                                        float(fps_hint), (w, h), False)
-                if not vw[0].isOpened():
-                    raise RuntimeError(
-                        f"cv2.VideoWriter failed to open {avi_path} with FFV1. "
-                        "Verify your OpenCV build has ffmpeg + FFV1 support "
-                        "(check cv2.getBuildInformation() for 'FFMPEG: YES')."
-                    )
+                vw[0] = FrameWriter(avi_path, h, w, fps_hint, frame_data)
             vw[0].write(frame_data)
             write_q.task_done()
 
@@ -515,21 +643,14 @@ def acquire_camera_nruns(cam, name, save_dir, dur_s, period_s, n_runs,
                 break
             if item == "CLOSE":        # close current AVI (between runs)
                 if vw[0] is not None:
-                    vw[0].release()
+                    vw[0].close()
                     vw[0] = None
                 write_q.task_done()
                 continue
             avi_path, frame_data = item
             if vw[0] is None:
                 h, w = frame_data.shape[:2]
-                vw[0] = cv2.VideoWriter(avi_path, cv2.VideoWriter_fourcc(*"FFV1"),
-                                        float(fps_hint), (w, h), False)
-                if not vw[0].isOpened():
-                    raise RuntimeError(
-                        f"cv2.VideoWriter failed to open {avi_path} with FFV1. "
-                        "Verify your OpenCV build has ffmpeg + FFV1 support "
-                        "(check cv2.getBuildInformation() for 'FFMPEG: YES')."
-                    )
+                vw[0] = FrameWriter(avi_path, h, w, fps_hint, frame_data)
             vw[0].write(frame_data)
             write_q.task_done()
 
@@ -774,6 +895,36 @@ def cmd_preview(args):
     print("Preview closed.")
 
 
+def cmd_check(args):
+    """Preflight ONE camera: open it with the real acquisition settings (roi,
+    exposure, binning, fps, trigger), let open_camera report the achievable
+    frame rate + any fps/exposure mismatch, then close.  No frames are grabbed.
+
+    The MATLAB GUI / n-runs scripts call this once per enabled camera before
+    recording and parse RESULTING_FPS= / FPS_MISMATCH= from the output to warn
+    (and require confirmation) when the requested fps can't be met.
+    """
+    devices = list_cameras()
+    if not devices:
+        sys.exit(1)
+    if args.serial and args.serial.upper() != "AUTO":
+        dev = find_device(devices, args.serial)
+    else:
+        dev = devices[0]
+    if dev is None:
+        print(f"ERROR: camera {args.serial} not found")
+        sys.exit(1)
+    roi = parse_roi(args.roi)
+    cam = open_camera(dev, args.name, args.trigger, args.fps, args.pixel,
+                      args.binH, args.binV, roi, burst_count=args.burst,
+                      exposure_us=args.exposure, edge=args.edge)
+    try:
+        cam.Close()
+    except Exception:
+        pass
+    print("CHECK_DONE")
+
+
 def cmd_acquire(args):
     """Session-based dual-camera acquisition.
 
@@ -788,6 +939,12 @@ def cmd_acquire(args):
     pidfile = os.path.join(os.environ.get('TEMP', '.'), 'basler_acq.pid')
     with open(pidfile, 'w') as f:
         f.write(str(os.getpid()))
+
+    if FFMPEG_EXE:
+        print(f"[encoder] multithreaded ffmpeg FFV1: {FFMPEG_EXE}")
+    else:
+        print("[encoder] WARNING: ffmpeg not found -> cv2 single-thread FFV1 "
+              "(slow saves). Put ffmpeg.exe on PATH or set BASLER_FFMPEG to fix.")
 
     devices = list_cameras()
     if not devices:
@@ -944,6 +1101,12 @@ def cmd_acquire_nruns(args):
     with open(pidfile, 'w') as f:
         f.write(str(os.getpid()))
 
+    if FFMPEG_EXE:
+        print(f"[encoder] multithreaded ffmpeg FFV1: {FFMPEG_EXE}")
+    else:
+        print("[encoder] WARNING: ffmpeg not found -> cv2 single-thread FFV1 "
+              "(slow saves). Put ffmpeg.exe on PATH or set BASLER_FFMPEG to fix.")
+
     devices = list_cameras()
     if not devices:
         sys.exit(1)
@@ -1089,6 +1252,22 @@ def main():
     pv.add_argument("--binH",    type=int, default=1)
     pv.add_argument("--binV",    type=int, default=1)
 
+    # check -- preflight one camera's achievable fps for given settings
+    ck = sub.add_parser("check",
+                        help="Preflight: report achievable fps for given settings")
+    ck.add_argument("--serial",   default="AUTO")
+    ck.add_argument("--name",     default="cam")
+    ck.add_argument("--trigger",  default="freerun",
+                    choices=["hardware", "burst", "freerun"])
+    ck.add_argument("--fps",      type=float, default=90)
+    ck.add_argument("--exposure", type=float, default=0)
+    ck.add_argument("--binH",     type=int, default=1)
+    ck.add_argument("--binV",     type=int, default=1)
+    ck.add_argument("--pixel",    default="Mono8")
+    ck.add_argument("--roi",      default=None)
+    ck.add_argument("--burst",    type=int, default=1)
+    ck.add_argument("--edge",     default="falling", choices=["falling", "rising"])
+
     # acquire
     a = sub.add_parser("acquire", help="Dual-camera acquisition")
     a.add_argument("--saveDir",    required=True)
@@ -1208,6 +1387,8 @@ def main():
         cmd_list(args)
     elif args.cmd == "preview":
         cmd_preview(args)
+    elif args.cmd == "check":
+        cmd_check(args)
     elif args.cmd == "acquire":
         cmd_acquire(args)
     elif args.cmd == "acquire-nruns":

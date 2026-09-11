@@ -16,6 +16,16 @@
 %   helper.dFF_RZ
 clear; clc; delete(gcp('nocreate'));
 
+% Force white-on-black for all figures regardless of MATLAB dark theme.
+% Prevents saved PNGs from inheriting the IDE theme's dark axes/labels.
+set(groot, 'defaultFigureColor',    'w');
+set(groot, 'defaultAxesColor',      'w');
+set(groot, 'defaultAxesXColor',     'k');
+set(groot, 'defaultAxesYColor',     'k');
+set(groot, 'defaultAxesZColor',     'k');
+set(groot, 'defaultTextColor',      'k');
+set(groot, 'defaultAxesGridColor',  [0.15 0.15 0.15]);
+
 repoRoot = fileparts(mfilename('fullpath'));
 addpath(repoRoot);
 addpath(fullfile(repoRoot, '2p_breathing_coherence'));
@@ -26,7 +36,7 @@ addpath(fullfile(repoRoot, 'SVD'));
 %% ============================== USER ==============================
 masterFolder = "";   % multi-experiment master dir
 %folderPath   = "C:\Users\Admin\Desktop\260330_sst_soma_g8s\phys\IO";   % single folder (ignored if masterFolder set)
-folderPath = "C:\Users\Admin\Desktop\260517_shi_cal590\phys";
+folderPath = "C:\Users\Admin\Desktop\260909_ChAT_g8m_Shiverer\phys";
 % Output goes directly into the data folder alongside the TIFF
 
 % -------- re-run options --------
@@ -38,7 +48,7 @@ MakeMontageVideo = false; % true = generate per-ROI montage video + avg proj lab
 
 % -------- channel handling --------
 AutoDetectChannels  = true;
-KeepChannelID       = 2;
+KeepChannelID       = 1;
 NumChannelsFallback = 1;
 
 % -------- frame selection --------
@@ -51,7 +61,7 @@ TrimR = 0;
 % -------- MC (2-pass rigid) --------
 MaxShiftUm     = 10;      % max physical shift (um) — auto-converted from zoom
 PixelSizeBase  = 1.7778;  % um/px at 1x zoom
-MCpasses       = 1;       % rigid MC passes (2 = template refinement)
+MCpasses       = 2;       % rigid MC passes (2 = template refinement)
 MCinitBatch    = 500;     % frames for initial template
 MCbinWidth     = 50;      % frames per batch (~1.7s at 30fps)
 MCTossFrames   = 30;      % toss first N frames before MC
@@ -61,7 +71,7 @@ FPS               = 30;   % fallback if TIFF metadata missing; auto-detected per
 Diameter          = [];   % [] = Cellpose auto-estimates; or set numeric pixels (e.g. 30)
 UseGPU            = true;
 FlowThreshold     = 0.4;
-CellprobThreshold = -0.5;
+CellprobThreshold = -0.65;
 
 % -------- dFF --------
 BaselineWinSec = 15;

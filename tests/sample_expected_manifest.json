@@ -1,0 +1,257 @@
+{
+  "schemaVersion": "1.0.0",
+  "generator": "analyze_document.jsx",
+  "generatedAt": "Thu Jul 16 2026 18:40:00 GMT-0400",
+  "document": {
+    "name": "Figure1.ai",
+    "fullPath": "D:\\second-year-propsal\\Figure1.ai",
+    "saved": true,
+    "colorSpace": "DocumentColorSpace.RGB",
+    "rulerUnits": "RulerUnits.Points",
+    "illustratorVersion": "28.0.0",
+    "buildNumber": null,
+    "artboards": [
+      {
+        "index": 0,
+        "name": "Artboard 1",
+        "artboardRect": [0, 792, 612, 0],
+        "width": 612,
+        "height": 792
+      }
+    ]
+  },
+  "layers": [
+    {
+      "kind": "layer",
+      "name": "Figure",
+      "visible": true,
+      "locked": false,
+      "opacity": 100,
+      "color": {
+        "type": "RGBColor",
+        "red": 79,
+        "green": 128,
+        "blue": 255
+      },
+      "items": [
+        {
+          "typename": "TextFrameItem",
+          "uuid": "9F2B7C1A-3D4E-4F50-8A61-1122334455AA",
+          "name": "title",
+          "note": "",
+          "locked": false,
+          "hidden": false,
+          "editable": true,
+          "geometricBounds": [36, 756, 320, 738],
+          "visibleBounds": [36, 756, 320, 738],
+          "controlBounds": [36, 756, 320, 738],
+          "position": [36, 756],
+          "width": 284,
+          "height": 18,
+          "rotation": null,
+          "parent": { "kind": "layer", "typename": "Layer", "name": "Figure" },
+          "text": {
+            "contents": "Breathing-triggered dF/F",
+            "kind": "TextType.POINTTEXT",
+            "orientation": "TextOrientation.HORIZONTAL",
+            "characterCount": 24,
+            "paragraphs": [
+              { "index": 0, "justification": "Justification.LEFT" }
+            ],
+            "runs": [
+              {
+                "text": "Breathing-triggered dF/F",
+                "length": 24,
+                "font": { "name": "ArialMT", "family": "Arial", "style": "Regular" },
+                "size": 12,
+                "baselineShift": 0,
+                "horizontalScale": 100,
+                "verticalScale": 100,
+                "tracking": 0,
+                "capitalization": "FontCapsOption.NORMALCAPS",
+                "fillColor": { "type": "RGBColor", "red": 0, "green": 0, "blue": 0 },
+                "strokeColor": { "type": "NoColor" }
+              }
+            ]
+          }
+        },
+        {
+          "typename": "TextFrameItem",
+          "uuid": "A1B2C3D4-E5F6-4A5B-9C8D-2233445566BB",
+          "name": "axis-label",
+          "note": "",
+          "locked": false,
+          "hidden": false,
+          "editable": true,
+          "geometricBounds": [40, 120, 92, 108],
+          "visibleBounds": [40, 120, 92, 108],
+          "controlBounds": [40, 120, 92, 108],
+          "position": [40, 120],
+          "width": 52,
+          "height": 12,
+          "rotation": null,
+          "parent": { "kind": "layer", "typename": "Layer", "name": "Figure" },
+          "text": {
+            "contents": "n = 12",
+            "kind": "TextType.POINTTEXT",
+            "orientation": "TextOrientation.HORIZONTAL",
+            "characterCount": 6,
+            "paragraphs": [
+              { "index": 0, "justification": "Justification.LEFT" }
+            ],
+            "runs": [
+              {
+                "text": "n = ",
+                "length": 4,
+                "font": { "name": "Arial-ItalicMT", "family": "Arial", "style": "Italic" },
+                "size": 8,
+                "baselineShift": 0,
+                "horizontalScale": 100,
+                "verticalScale": 100,
+                "tracking": 0,
+                "capitalization": "FontCapsOption.NORMALCAPS",
+                "fillColor": { "type": "RGBColor", "red": 0, "green": 0, "blue": 0 },
+                "strokeColor": { "type": "NoColor" }
+              },
+              {
+                "text": "12",
+                "length": 2,
+                "font": { "name": "ArialMT", "family": "Arial", "style": "Regular" },
+                "size": 8,
+                "baselineShift": 0,
+                "horizontalScale": 100,
+                "verticalScale": 100,
+                "tracking": 0,
+                "capitalization": "FontCapsOption.NORMALCAPS",
+                "fillColor": { "type": "RGBColor", "red": 0, "green": 0, "blue": 0 },
+                "strokeColor": { "type": "NoColor" }
+              }
+            ]
+          }
+        },
+        {
+          "typename": "PathItem",
+          "uuid": "B2C3D4E5-F6A7-4B5C-8D9E-3344556677CC",
+          "name": "x-axis",
+          "note": "",
+          "locked": false,
+          "hidden": false,
+          "editable": true,
+          "geometricBounds": [100, 300, 100, 60],
+          "visibleBounds": [99.5, 300, 100.5, 60],
+          "controlBounds": [99.5, 300, 100.5, 60],
+          "position": [60, 100.5],
+          "width": 240,
+          "height": 1,
+          "rotation": null,
+          "parent": { "kind": "layer", "typename": "Layer", "name": "Figure" },
+          "path": {
+            "closed": false,
+            "filled": false,
+            "stroked": true,
+            "clipping": false,
+            "strokeWidth": 1,
+            "pathPointCount": 2,
+            "fillColor": { "type": "NoColor" },
+            "strokeColor": { "type": "RGBColor", "red": 0, "green": 0, "blue": 0 }
+          }
+        },
+        {
+          "typename": "GroupItem",
+          "uuid": "C3D4E5F6-A7B8-4C5D-9E0F-4455667788DD",
+          "name": "panelA-clip",
+          "note": "clipped raster panel",
+          "locked": false,
+          "hidden": false,
+          "editable": true,
+          "geometricBounds": [400, 300, 120, 60],
+          "visibleBounds": [400, 300, 120, 60],
+          "controlBounds": [400, 300, 120, 60],
+          "position": [60, 400],
+          "width": 240,
+          "height": 280,
+          "rotation": null,
+          "parent": { "kind": "layer", "typename": "Layer", "name": "Figure" },
+          "group": { "clipped": true },
+          "children": [
+            {
+              "typename": "PathItem",
+              "uuid": "D4E5F6A7-B8C9-4D5E-8F10-5566778899EE",
+              "name": "clip-rect",
+              "note": "",
+              "locked": false,
+              "hidden": false,
+              "editable": true,
+              "geometricBounds": [400, 300, 120, 60],
+              "visibleBounds": [400, 300, 120, 60],
+              "controlBounds": [400, 300, 120, 60],
+              "position": [60, 400],
+              "width": 240,
+              "height": 280,
+              "rotation": null,
+              "parent": { "kind": "group", "typename": "GroupItem", "name": "panelA-clip" },
+              "path": {
+                "closed": true,
+                "filled": false,
+                "stroked": false,
+                "clipping": true,
+                "strokeWidth": 1,
+                "pathPointCount": 4,
+                "fillColor": { "type": "NoColor" },
+                "strokeColor": { "type": "NoColor" }
+              }
+            },
+            {
+              "typename": "RasterItem",
+              "uuid": "E5F6A7B8-C9D0-4E5F-9011-6677889900FF",
+              "name": "Figure1_RGB",
+              "note": "",
+              "locked": false,
+              "hidden": false,
+              "editable": true,
+              "geometricBounds": [410, 320, 110, 40],
+              "visibleBounds": [410, 320, 110, 40],
+              "controlBounds": [410, 320, 110, 40],
+              "position": [40, 410],
+              "width": 280,
+              "height": 300,
+              "rotation": null,
+              "parent": { "kind": "group", "typename": "GroupItem", "name": "panelA-clip" },
+              "raster": {
+                "embedded": true,
+                "linked": false,
+                "file": {
+                  "fsName": "D:\\second-year-propsal\\Figure1_RGB.jpg",
+                  "exists": true
+                },
+                "effectiveBounds": [410, 320, 110, 40]
+              }
+            }
+          ]
+        }
+      ],
+      "sublayers": []
+    }
+  ],
+  "statistics": {
+    "totalItems": 6,
+    "maxNestingDepth": 1,
+    "itemsByType": [
+      { "typename": "GroupItem", "count": 1 },
+      { "typename": "PathItem", "count": 2 },
+      { "typename": "RasterItem", "count": 1 },
+      { "typename": "TextFrameItem", "count": 2 }
+    ],
+    "fonts": [
+      { "name": "Arial-ItalicMT", "family": "Arial", "style": "Italic", "characters": 4, "runs": 1 },
+      { "name": "ArialMT", "family": "Arial", "style": "Regular", "characters": 26, "runs": 2 }
+    ],
+    "warningCount": 1
+  },
+  "warnings": [
+    {
+      "context": "rotation",
+      "message": "The Illustrator DOM does not expose a per-item rotation angle; 'rotation' is reported as null for all page items."
+    }
+  ]
+}

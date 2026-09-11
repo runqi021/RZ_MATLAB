@@ -9,10 +9,10 @@ import cv2
 import ruamel.yaml
 
 # ===== USER SETTINGS =====
-video_dir    = r"C:\Users\Admin\Desktop\260505_breathing_wt\cam1"
-proj_name    = "260505_breathing_wt_C3H"
+video_dir    = r"Z:\Runqi\behavior\260224_vglut2_soma_g8s_IO_sensory_breathing"
+proj_name    = "260529_vglut2_soma_g8s_IO_breathing"
 experimenter = "RZ"
-bodyparts    = ["dot1", "dot2", "dot3", "dot4"]
+bodyparts    = ["dot1", "dot2", "dot3"]
 work_dir     = video_dir                   # DLC project created inside video folder
 numframes    = 20                           # frames per video to extract
 algo         = "uniform"                    # "uniform" or "kmeans"
@@ -30,7 +30,7 @@ vw = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
 vh = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
 cap.release()
 crop_str = f"0, {vw}, 0, {vh}"
-print(f"Video size: {vw} x {vh}  →  crop = '{crop_str}'")
+print(f"Video size: {vw} x {vh}  ->  crop = '{crop_str}'")
 
 # ===== CREATE PROJECT =====
 print("\n=== Creating project ===")

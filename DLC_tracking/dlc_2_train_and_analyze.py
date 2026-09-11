@@ -7,11 +7,10 @@ import glob
 import os
 
 # ===== USER SETTINGS =====
-video_dir = r"C:\Users\Admin\Desktop\260505_breathing_wt\cam1"
+video_dir = r"Z:\Runqi\behavior\260224_vglut2_soma_g8s_IO_sensory_breathing"
 
-# Explicit config path — L-side project lives on Desktop, NOT inside video_dir.
-# Flip this to the R-project path when retraining R.
-config = r"C:\Users\Admin\Desktop\260505_breathing_wt\cam1\260505_breathing_wt_C3H-RZ-2026-05-05\config.yaml"
+# Explicit config path for the breathing project (created 2026-05-29 by dlc_1).
+config = r"Z:\Runqi\behavior\260224_vglut2_soma_g8s_IO_sensory_breathing\260529_vglut2_soma_g8s_IO_breathing-RZ-2026-05-29\config.yaml"
 assert os.path.isfile(config), f"Config not found: {config}"
 print(f"Using config: {config}")
 

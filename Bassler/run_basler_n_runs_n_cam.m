@@ -3,7 +3,8 @@ close all; clc;
 % Multi-camera Basler N-runs free-run acquisition (untriggered).
 % Calls basler_dual_acq.py with the acquire-nruns subcommand.
 % RAM-first lossless pipeline: pylon transport buffer -> queue.Queue
-% -> background writer_thread -> cv2.VideoWriter FFV1 AVI (lossless).
+% -> background writer_thread -> FrameWriter (multithreaded ffmpeg FFV1 AVI,
+%    lossless; falls back to single-thread cv2.VideoWriter if ffmpeg absent).
 %
 % Each enabled camera runs free-run at its requested fps. For each run:
 %   open AVI -> grab dur_s seconds -> close AVI + save timestamps.csv ->
@@ -16,11 +17,11 @@ close all; clc;
 %       timestamps.csv
 
 %% ------------------- USER SETTINGS --------------------------------------
-saveDir       = "C:\Users\Admin\Desktop\260505_breathing_wt";
+saveDir       = "C:\Users\Admin\Desktop\260602_orofacial_ChAT_ChroME";
 
-dur_s         = 60;            % seconds per run
+dur_s         = 300;            % seconds per run
 period_s      = 5*60;          % seconds between RUN STARTS
-nRuns         = 200;            % total number of runs
+nRuns         = 1;            % total number of runs
 
 % Per-camera config (set enable=false to skip a slot).
 % serial: "" -> auto-pick first available; or paste exact SN string.
@@ -29,14 +30,14 @@ nRuns         = 200;            % total number of runs
 cams(1).enable    = true;
 cams(1).serial    = "";
 cams(1).name      = "cam1";
-cams(1).fps       = 100;
+cams(1).fps       = 200;
 cams(1).pixel     = "Mono8";
-cams(1).binH      = 3;
-cams(1).binV      = 3;
+cams(1).binH      = 1;
+cams(1).binV      = 1;
 cams(1).exposure  = 0;
 cams(1).roi       = "";
 
-cams(2).enable    = true;
+cams(2).enable    = false;
 cams(2).serial    = "";
 cams(2).name      = "cam2";
 cams(2).fps       = 100;
@@ -133,6 +134,45 @@ for k = 1:numel(cams)
     end
 end
 
+%% ------------------- PREFLIGHT: achievable-fps check --------------------
+% Open each enabled camera with its REAL settings (fps/exposure/roi/bin) and
+% ask the camera for its ResultingFrameRate, so we warn BEFORE recording if
+% the requested fps can't be met (e.g. asking 200 Hz that the ROI/exposure
+% caps at ~115 Hz). The Python `check` command reports RESULTING_FPS=/FPS_MISMATCH=.
+fprintf("\n=== Preflight: checking achievable fps per camera ===\n");
+anyMismatch = false;
+for k = 1:numel(cams)
+    cams(k).resultingFps = NaN;     %#ok<AGROW>
+    cams(k).mismatch     = false;   %#ok<AGROW>
+    if ~cams(k).enable, continue; end
+    serialArg = "";
+    if strlength(cams(k).serial) > 0
+        serialArg = sprintf('--serial "%s"', cams(k).serial);
+    end
+    roiArg = "";
+    if strlength(cams(k).roi) > 0
+        roiArg = sprintf('--roi %s', cams(k).roi);
+    end
+    ckCmd = sprintf(['"%s" "%s" check %s --name %s --trigger freerun ' ...
+        '--fps %g --exposure %g --binH %d --binV %d --pixel %s %s'], ...
+        pyExe, pyScript, serialArg, cams(k).name, cams(k).fps, ...
+        cams(k).exposure, cams(k).binH, cams(k).binV, cams(k).pixel, roiArg);
+    [~, ckOut] = system(ckCmd);
+    rf = regexp(ckOut, 'RESULTING_FPS=([\d.]+)', 'tokens', 'once');
+    mm = regexp(ckOut, 'FPS_MISMATCH=(\d)', 'tokens', 'once');
+    if ~isempty(rf), cams(k).resultingFps = str2double(rf{1}); end %#ok<AGROW>
+    cams(k).mismatch = ~isempty(mm) && strcmp(mm{1}, '1');         %#ok<AGROW>
+    if cams(k).mismatch
+        anyMismatch = true;
+        fprintf(2, ['  [WARNING] %s: requested %g Hz but camera can do ~%.1f Hz ' ...
+            '(exposure=%g us). Crop ROI / bin more / shorten exposure.\n'], ...
+            cams(k).name, cams(k).fps, cams(k).resultingFps, cams(k).exposure);
+    else
+        fprintf("  [ok] %s: ~%.1f Hz achievable (requested %g Hz)\n", ...
+            cams(k).name, cams(k).resultingFps, cams(k).fps);
+    end
+end
+
 %% ------------------- CONFIRM PLAN ---------------------------------------
 fprintf("\n=== Acquisition Plan ===\n");
 fprintf("  saveDir : %s\n", saveDir);
@@ -149,17 +189,29 @@ for k = 1:numel(cams)
     if strlength(cams(k).roi) > 0, roiTxt = cams(k).roi; end
     snTxt = cams(k).serial;
     if strlength(snTxt) == 0, snTxt = "AUTO"; end
-    fprintf("    [%d] %-12s  SN=%s  %g Hz  bin %dx%d  pix=%s  ROI=%s\n", ...
-        nEnabled, cams(k).name, snTxt, cams(k).fps, ...
+    expTxt = "auto";
+    if cams(k).exposure > 0, expTxt = sprintf("%g us", cams(k).exposure); end
+    rfTxt = "?";
+    if ~isnan(cams(k).resultingFps), rfTxt = sprintf("%.0f", cams(k).resultingFps); end
+    fprintf("    [%d] %-12s  SN=%s  req %g Hz (achievable ~%s Hz)  exp=%s  bin %dx%d  pix=%s  ROI=%s\n", ...
+        nEnabled, cams(k).name, snTxt, cams(k).fps, rfTxt, expTxt, ...
         cams(k).binH, cams(k).binV, cams(k).pixel, roiTxt);
 end
 if nEnabled == 0
     fprintf("\nERROR: no cameras enabled. Exiting.\n"); return
 end
 
-resp = input(sprintf('\nStart acquisition? [Y/n]: '), "s");
-if ~isempty(resp) && ~strcmpi(resp, 'y')
-    fprintf("Aborted.\n"); return
+if anyMismatch
+    fprintf(2, "\n*** FPS MISMATCH on one or more cameras (see warnings above).\n");
+    resp = input(sprintf('Proceed anyway? [y/N]: '), "s");
+    if isempty(resp) || ~strcmpi(resp, 'y')
+        fprintf("Aborted.\n"); return
+    end
+else
+    resp = input(sprintf('\nStart acquisition? [Y/n]: '), "s");
+    if ~isempty(resp) && ~strcmpi(resp, 'y')
+        fprintf("Aborted.\n"); return
+    end
 end
 
 %% ------------------- ACQUIRE --------------------------------------------
