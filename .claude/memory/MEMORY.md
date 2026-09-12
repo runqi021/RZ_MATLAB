@@ -90,6 +90,7 @@
 - [MATLAB figure-reuse trap](feedback_matlab_offscreen_figure_reuse.md) — clf(hf) does NOT make hf current; batch exports come out blank
 
 ## Stitching
+- [**AO defocus MEASURED 260911**](project_ao_defocus_measured_260911.md) — DM moves focus **6.76 µm per µm of Zernike defocus**, linear over **−14 to +24 µm**, lateral cross-talk <1 px. Reproduced a stage z-stack to **0.65 µm RMS with the stage parked**. **Z2C coefficients are PtV, not RMS** — long-open question closed
 - [**AO real-time motion correction**](project_ao_motion_correction_260911.md) — SLAP2-style closed loop using the ALPAO DM, NOT new galvos; SI2018b already ships MotionManager; rig has NO X galvo and NO FastZ; stroke budget + Z2C rows 1/2/3 = tiltY/tipX/defocus; **nothing run on hardware**
 - [**Map acquisition pair 260910**](project_auto_acq_260910.md) — auto_acq_260910.m + acq_pause_queue.m; 10s/tile idle removed, live pause/brake/abort; **RUNS ON THE RIG, confirmed working 2026-09-11**. auto_acq now opens the control window itself. Open: no onCleanup, so Ctrl+C leaves `keepResonantScannerOn` true
 - [**Stage backlash MEASURED 260911**](project_stage_backlash_260911.md) — z: 0.1 µm encoder, backlash **0.205 ± 0.022 µm** flat over 5–100 µm steps → keep z-stacks unidirectional. **x/y have NO encoder — confirmed by physical inspection**, so their backlash is unmeasurable from registers and needs the image or a dial indicator. Open: `hSI.hMotors.backlashCompensation` unchecked
