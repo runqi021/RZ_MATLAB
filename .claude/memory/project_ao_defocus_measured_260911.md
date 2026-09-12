@@ -5,7 +5,7 @@ metadata:
   node_type: memory
   type: project
   originSessionId: c2f9c05c-e8f0-4298-9f58-57d55a9092fe
-  modified: 2026-09-12T01:37:09.238Z
+  modified: 2026-09-12T01:51:43.964Z
 ---
 
 Stage 0 of [[project-ao-motion-correction-260911]] is DONE and the DM demonstrably
@@ -13,9 +13,12 @@ controls focus. Scripts in `matlab-wroking\ao-motion\` (repo `ao_motion_260911\`
 `dm_motion_calib_260911.m` (gain) and `dm_zstack_demo_260911.m` (proof).
 
 ## THE NUMBERS
-- **Gain 6.656 um of focus per um of Zernike defocus coefficient** (Z2C row 3),
-  from `dm_motion_calib_260911_1824.mat`. The stack demo then measured a slope of
-  0.9845 against it, so the **refined value is 6.76 um/um**.
+- **Gain ~7.0 um of focus per um of Zernike defocus coefficient** (Z2C row 3).
+  The calibration gave 6.656; four independent stack demos then measured slopes
+  of 0.9845 / 0.9688 / 0.8685 / 0.9580 against it (mean 0.945, sd 0.052), i.e. an
+  implied gain of 6.76 / 6.87 / 7.66 / 6.95, **mean 7.04**. Quote **~7 um/um
+  +-5%**, not three digits. Every run gives slope < 1, so 6.656 is consistently
+  an UNDERESTIMATE.
 - **Linear over the whole tested range.** Residuals about a straight line show
   scatter, no curvature, at both +-2 coefficient and across the 39 um demo.
 - **Lateral cross-talk < 1 px** for coefficient in [-1, +1]. Defocus is
@@ -44,12 +47,28 @@ residual RMS 0.648 um over 39 planes
 **Sub-micron residual, below the 1 um step size.** The DM puts the focus where it
 is asked to, across 39 um, with no stage motion.
 
-Two things to know about that run:
-- **Offset +1.58 um**, DM stack sitting above the stage stack. The two stacks ran
-  sequentially ~10 min apart, so thermal drift is the leading candidate (too big
-  for the 0.205 um stage backlash). UNRESOLVED — a second FOV was being acquired
-  to test whether it reproduces. If it does, it is a real defocus zero-point
-  offset; if it changes, it was drift.
+## REPRODUCED OVER FOUR FOVs (1830, 1835, 1838, 1842)
+| run | slope | offset um | resid RMS | med r |
+|---|---|---|---|---|
+| 1830 | 0.9845 | +1.58 | 0.648 | 0.481 |
+| 1835 | 0.9688 | +0.38 | 0.636 | 0.476 |
+| 1838 | 0.8685 | +0.72 | 0.912 | 0.514 |
+| 1842 | 0.9580 | +0.02 | 0.709 | 0.451 |
+
+**Residual RMS 0.73 +- 0.13 um across four independent fields** — that is the
+robust result, sub-micron every time.
+
+- **The OFFSET IS DRIFT, settled.** +1.58 / +0.38 / +0.72 / +0.02, scattered
+  about zero with no repeated value. A real defocus zero-point offset would have
+  reproduced. It is thermal drift between the two sequentially-acquired stacks.
+- **Slope scatter (sd 0.052) is NOT explained.** 1838 is the outlier at 0.87.
+  The obvious story — regression dilution from bleaching, where a noisier match
+  pulls estimates toward the stack centre and shrinks the slope — is ruled out by
+  the data: `corr(slope, median r) = -0.75`, i.e. 1838 has the HIGHEST
+  correlation and the LOWEST slope, the wrong way round. With n=4 that is weak
+  evidence, but do not repeat the bleaching explanation as if it were
+  established. Something field-specific, possibly how structure is distributed
+  in z. OPEN.
 - **Peak correlation rises MONOTONICALLY with defocus, 0.345 -> 0.526.** Not
   noise. Most likely because DM defocus is not optically identical to stage
   translation: the stage translates the sample through an unchanged focus, while

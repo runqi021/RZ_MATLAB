@@ -1,78 +1,18 @@
 function tile_deinterleave_avgz_260910()
-%TILE_DEINTERLEAVE_AVGZ_260910  Deinterleave + avgz, sequential-read version.
-%
-% Same job and same outputs as tile_deinterleave_N_groupZavg_260131.m:
-%   rawDir\ch<N>\        <base>_ch<N>_deint.tif   Z*T pages, z-major then t
-%   rawDir\ch<N>\avgz\   <base>_ch<N>_avgz.tif    Z pages, mean over T
-%
-% ===================== WHERE THE TIME ACTUALLY GOES =====================
-% MEASURED, after two wrong guesses.  On one 260804 tile (2 ch x 54 z x 50 t =
-% 5400 pages of 512x512) written to E:, which does 129 MB/s sequential:
-%
-%   READ is NOT the problem.  setDirectory(p) per page vs sequential
-%   nextDirectory(), alternated three times so neither gets a warmer cache:
-%       setDirectory  29.8 / 29.5 / 29.8 s
-%       nextDirectory 27.8 / 27.5 / 27.7 s      -> 1.08x, i.e. nothing.
-%   The textbook objection to setDirectory -- that it rewalks the IFD chain and
-%   is therefore quadratic -- does not bite here, because libtiff caches the
-%   directory offsets it has already visited and the pages are read in ASCENDING
-%   order.  It would bite on random or backward access.
-%
-%   WRITING is the problem.  One 2700-page 1.32 GB channel file:
-%       raw fwrite, no TIFF      10.5 s   129 MB/s
-%       Tiff, one strip/page    103.8 s    13 MB/s
-%       Tiff, 64-row strips     169.2 s     8 MB/s   <- the ORIGINAL setting
-%       Tiff as BigTIFF         134.7 s    10 MB/s
-%       hand-laid TIFF           22.6 s    60 MB/s
-%   MATLAB's Tiff class costs 10-16x the raw byte rate.
-%
-% SO THE SPEEDUP COMES FROM TWO CHANGES, both on the write path:
-%   1. RowsPerStrip = ImageLength instead of 64            1.63x
-%   2. the deint file written directly, IFDs appended last 4.6x
-% Sequential reading is kept because it is free and slightly faster, not because
-% it was ever the bottleneck.
-%
-% Also removed: count_tiff_pages_file walks every IFD (~2-4 s here) and the old
-% script called it up to five times per tile, once for the strict check and once
-% per existing output, just to decide whether to skip.  Now at most once, and the
-% skip check reads the IFD table via imfinfo rather than the pixels.
-%
-% Measured and NOT a factor, so left alone: double vs single accumulation is
-% 1.09 vs 1.12 s per 200 pages.
-%
-% THE DEINT FILE IS THE EXPENSIVE OUTPUT: 2 x 1.32 GB per tile against 2 x 28 MB
-% for the avgz.  writeDeint = false is ~4x faster overall and is all the
-% stitcher consumes.
-%
-% Runqi Zhang / 2026-09-10
 
-%% ========================= USER SETTINGS =========================
-rawDir      = "E:\260804_shiver_dbh\map";
-chUse       = [];      % [] = EVERY channel the file saved, read per tile from
-                       % SI.hChannels.channelSave.  Give a list ([1 3]) only to
-                       % force a subset; an entry that was not actually saved is
-                       % dropped with a note instead of failing the tile.
+rawDir      = "D:\Data\RZ\test260911";
+chUse       = [];
+writeDeint  = false; 
 
-writeDeint  = false;   % avgz only.  The deint file is a regenerable cache --
-                       % the raw TIFF is still on disk -- and nothing downstream
-                       % reads it: the stitcher and both GUIs open ch<N>/avgz only.
-                       % 35 s and 57 MB per tile, against 53 s and 2.5 GB.
-maxFiles    = [];      % [] = every tile; a number caps it, for a test run
-outRoot     = "";      % "" = write into rawDir; set a path to redirect (testing)
-
-recursive   = false;
-strictMeta  = true;    % verify pages == nCh*nZ*nT before doing any work
-forceUint16 = true;    % int16 -> uint16 with an offset, no wrapping
-int16Offset = 32768;
-%% =================================================================
+%%
+maxFiles    = [];    outRoot     = "";
+strictMeta  = true;  recursive   = false;
+forceUint16 = true;  int16Offset = 32768;
 
 if ~isfolder(rawDir), error("Not a folder: %s", rawDir); end
 if outRoot == "", outRoot = rawDir; end
 
 files = list_tiffs(rawDir, recursive);
-% Skip this script's own outputs.  Matching ANY ch<N> folder rather than two
-% named ones keeps the filter independent of how many channels there turn out
-% to be -- which is not known until each tile's header is read.
 files = files(cellfun(@isempty, regexpi(cellstr(files), ['\' filesep 'ch\d+\' filesep], 'once')));
 files = files(~contains(lower(files), lower(filesep + "avgz" + filesep)));
 files = files(~contains(lower(files), "stitched"));
@@ -98,9 +38,6 @@ for k = 1:numel(files)
         nSkip = nSkip + 1; fprintf("  [skip] no channelSave (not ScanImage?)\n"); continue
     end
 
-    % channelSave IS the channel count: its length sets the page cycle, and its
-    % order sets each channel's position within that cycle.  Nothing here is
-    % hard-coded to two.
     chSave = num_vec(meta('SI.hChannels.channelSave')); chSave = chSave(:).';
     nCh = numel(chSave);
     if isempty(chUse)
@@ -117,7 +54,7 @@ for k = 1:numel(files)
         fprintf("  [skip] none of the requested channels are in channelSave [%s]\n", num2str(chSave));
         continue
     end
-    cIdx = arrayfun(@(id) find(chSave == id, 1), chIDs);  % position in the page cycle
+    cIdx = arrayfun(@(id) find(chSave == id, 1), chIDs);
     nSel = numel(chIDs);
 
     [nZ, nT, orderMode] = infer_zt(meta);
@@ -136,10 +73,6 @@ for k = 1:numel(files)
         outAz(m) = fullfile(dZ,  baseName + sprintf("_ch%d_avgz.tif",  chIDs(m)));
     end
 
-    % Existence check by SIZE, not by walking every IFD of every output.  The
-    % old version called count_tiff_pages_file four times here, each a full pass
-    % over the file -- i.e. it could spend longer deciding to skip than the
-    % actual work would have taken on the avgz.
     want = cellstr(outAz(:));  wantPages = repmat(nZ, 1, nSel);
     if writeDeint
         want = [want; cellstr(outDe(:))];
@@ -163,12 +96,8 @@ end
 fprintf("\n[DONE] ok %d, skipped %d, total %.1f s\n", nOK, nSkip, toc(tAll));
 end
 
-%% ============================ CORE ============================
 function one_tile(rawFn, nCh, nZ, nT, orderMode, cIdx, strictMeta, ...
                   outDe, outAz, writeDeint, forceUint16, int16Offset)
-% cIdx holds each wanted channel's POSITION IN THE PAGE CYCLE (1..nCh), and
-% outDe/outAz hold one filename per entry.  Everything below is written over
-% numel(cIdx), so one channel or four cost the same code.
 
 nSel = numel(cIdx);
 
@@ -186,11 +115,6 @@ end
 doOffset = forceUint16 && strcmpi(inClass,'int16');
 if doOffset, outClass = 'uint16'; else, outClass = inClass; end
 
-% SEQUENTIAL ORDER ONLY.  The reader is advanced with nextDirectory, so pages
-% must be consumed in ascending order -- which is exactly the order the loop
-% wants them in for a slice-major stack.  A volume-interleaved stack needs its
-% deinterleaved pages in an order the file does not supply, so that case goes
-% to the indexed path rather than being silently written out of order.
 seqOK = (orderMode == "sliceMajor");
 if writeDeint && ~seqOK
     warning(['volume-interleaved stack: the deinterleaved page order cannot be ' ...
@@ -201,17 +125,7 @@ if writeDeint && ~seqOK
     return
 end
 
-% WRITING.  MATLAB's Tiff class costs 10-16x the raw byte rate on this data,
-% measured on one 2700-page 1.32 GB channel file written to E: (drive does
-% 129 MB/s):
-%       raw fwrite              10.5 s   129 MB/s
-%       Tiff, one strip/page   103.8 s    13 MB/s
-%       Tiff, 64-row strips    169.2 s     8 MB/s   <- the original setting
-%       Tiff BigTIFF           134.7 s    10 MB/s
-%       hand-laid TIFF          22.6 s    60 MB/s
-% So the deint file is written directly: pixel pages streamed back to back, all
-% IFDs appended at the end.  4.6x on the file that dominates the run.
-classicMax = 4e9;                       % classic TIFF offsets are uint32
+classicMax = 4e9;
 deintBytes = 8 + nZ*nT*H*W*2 + nZ*nT*130;
 useFast    = deintBytes < classicMax;
 if writeDeint && ~useFast
@@ -229,8 +143,6 @@ if writeDeint
     end
 end
 
-% page-cycle position -> output slot; 0 means this channel is not wanted and its
-% page is stepped over without being read.
 slotOf = zeros(1, nCh);  slotOf(cIdx) = 1:nSel;
 
 acc  = zeros(H, W, nSel, 'single');
@@ -277,14 +189,6 @@ end
 
 function indexed_path(rawFn, outDe, outAz, nCh, nZ, nT, orderMode, cIdx, ...
                       H, W, outClass, doOffset, int16Offset)
-% setDirectory per page: the only way to get deinterleaved output in a usable
-% order out of a volume-interleaved stack.  Slow, and only reached when
-% writeDeint is on -- avgz alone never needs it.
-%
-% This used to be called with filenames in parameters that expected already-open
-% Tiff objects, and one argument short of its own signature, so the first
-% volume-interleaved tile with writeDeint on would have errored.  Dormant,
-% because writeDeint defaults to false.  It opens its own handles now.
 nSel = numel(cIdx);
 tr  = Tiff(rawFn, 'r');  cR = onCleanup(@() tr.close());
 tag = base_tag(H, W, outClass);
@@ -317,7 +221,6 @@ end
 for m = 1:nSel, td{m}.close();  ta{m}.close(); end
 end
 
-%% ========================== HELPERS ==========================
 function tag = base_tag(H, W, cls)
 tag = struct();
 tag.ImageLength = H;  tag.ImageWidth = W;
@@ -326,14 +229,10 @@ tag.SamplesPerPixel = 1;
 [tag.BitsPerSample, tag.SampleFormat] = class_fmt(cls);
 tag.PlanarConfiguration = Tiff.PlanarConfiguration.Chunky;
 tag.Compression = Tiff.Compression.None;
-% ONE strip per page.  MATLAB's writer pads a partial final strip out to a full
-% RowsPerStrip, so a height that is not a multiple of it silently inflates every
-% page; a single strip has no partial strip to pad and needs fewer offsets.
 tag.RowsPerStrip = H;
 end
 
 function m = deint_mode(H, W, nPages)
-% Classic TIFF tops out at 4 GB of offsets; switch to BigTIFF before that.
 if H*W*2*nPages > 3.5e9, m = 'w8'; else, m = 'w'; end
 end
 
@@ -342,7 +241,7 @@ tf = true;
 for k = 1:numel(files)
     d = dir(files{k});
     if isempty(d), tf = false; return; end
-    info = imfinfo(files{k});          % reads the IFD table, not the pixels
+    info = imfinfo(files{k});
     if numel(info) ~= wantPages(k), tf = false; return; end
 end
 end
@@ -430,31 +329,17 @@ switch cls
 end
 end
 
-
-%% ==================== DIRECT TIFF WRITER ====================
-% Classic little-endian TIFF, uncompressed, one strip per page, every page the
-% same size.  Pixels are streamed back to back from byte 8 and all IFDs are
-% appended at the end, so nothing ever seeks backwards except the 4-byte patch
-% of the first-IFD pointer at close.
-%
-% Only valid while the file stays under 4 GB -- classic TIFF offsets are uint32.
-% The caller checks that and falls back to Tiff('w8') when it would not.
-
 function w = ftw_begin(fn, H, W, cls)
 if isfile(fn), delete(fn); end
 w.fid = fopen(fn, 'w');
 if w.fid < 0, error("cannot open %s for writing", fn); end
 w.H = H; w.W = W; w.cls = cls; w.n = 0; w.fn = fn;
-fwrite(w.fid, [73 73], 'uint8');   % 'II'
-fwrite(w.fid, 42, 'uint16');       % classic TIFF
-fwrite(w.fid, 0, 'uint32');        % first-IFD offset, patched in ftw_end
+fwrite(w.fid, [73 73], 'uint8');
+fwrite(w.fid, 42, 'uint16');
+fwrite(w.fid, 0, 'uint32');
 end
 
 function w = ftw_write(w, P)
-% TRANSPOSED.  MATLAB is column-major, TIFF stores raster rows.  Writing P as-is
-% yields a file whose metadata is entirely valid and whose every page is silently
-% transposed -- invisible on a square tile until you compare pixels, which is
-% exactly how it got past the first test here.
 w.n = w.n + 1;
 fwrite(w.fid, P.', w.cls);
 end
@@ -471,16 +356,16 @@ ifd0 = ftell(w.fid);
 ifdSize = 2 + 10*12 + 4;
 for k = 1:n
     fwrite(w.fid, 10, 'uint16');
-    ftw_tag(w.fid, 256, 4, W);                    % ImageWidth
-    ftw_tag(w.fid, 257, 4, H);                    % ImageLength
-    ftw_tag(w.fid, 258, 3, 16);                   % BitsPerSample
-    ftw_tag(w.fid, 259, 3, 1);                    % Compression = none
-    ftw_tag(w.fid, 262, 3, 1);                    % BlackIsZero
-    ftw_tag(w.fid, 273, 4, 8 + (k-1)*nBytes);     % StripOffsets
-    ftw_tag(w.fid, 277, 3, 1);                    % SamplesPerPixel
-    ftw_tag(w.fid, 278, 4, H);                    % RowsPerStrip = whole page
-    ftw_tag(w.fid, 279, 4, nBytes);               % StripByteCounts
-    ftw_tag(w.fid, 339, 3, sfmt);                 % SampleFormat
+    ftw_tag(w.fid, 256, 4, W);
+    ftw_tag(w.fid, 257, 4, H);
+    ftw_tag(w.fid, 258, 3, 16);
+    ftw_tag(w.fid, 259, 3, 1);
+    ftw_tag(w.fid, 262, 3, 1);
+    ftw_tag(w.fid, 273, 4, 8 + (k-1)*nBytes);
+    ftw_tag(w.fid, 277, 3, 1);
+    ftw_tag(w.fid, 278, 4, H);
+    ftw_tag(w.fid, 279, 4, nBytes);
+    ftw_tag(w.fid, 339, 3, sfmt);
     if k < n, nxt = ifd0 + k*ifdSize; else, nxt = 0; end
     fwrite(w.fid, nxt, 'uint32');
 end
@@ -498,7 +383,7 @@ end
 
 function ftw_tag(fid, tag, type, val)
 fwrite(fid, tag, 'uint16'); fwrite(fid, type, 'uint16'); fwrite(fid, 1, 'uint32');
-if type == 3      % a SHORT lives in the first 2 bytes of the 4-byte value field
+if type == 3
     fwrite(fid, val, 'uint16'); fwrite(fid, 0, 'uint16');
 else
     fwrite(fid, val, 'uint32');

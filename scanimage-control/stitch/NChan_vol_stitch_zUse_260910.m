@@ -1,152 +1,89 @@
 function NChan_vol_stitch_zUse_260910()
-%NCHAN_VOL_STITCH_ZUSE_260910  Auto tile stitcher -- bounded NCC, self-calibrating.
-%
-% Drop-in replacement for NChan_vol_stitch_zUse.m.  The file discovery, the two
-% naming conventions, the channel pairing, zUse, the blending and the TIFF writer
-% are all as they were.  What changed is the registration, which is why the old
-% one failed.
-%
-% ============================ WHY THE OLD ONE FAILED ==========================
-% It cut the correlation patch AT THE INITIAL GUESS and phase-correlated that
-% patch.  A patch of width P can only represent shifts of +/- P/2 before the FFT
-% wraps, so the guess had to be right to within half the overlap it predicted --
-% the one thing it cannot be, since the guess is what is being corrected.
-%
-% Measured on 260909_ChAT_g8m_Shiverer\map:
-%   um_per_px_guess 0.8889195  ->  step 450.0 px,  patch 512-450 = 62 px wide
-%   unambiguous range           ->  +/- 31 px
-%   true step (144 curated pairs) 418.75 px  ->  correction needed -31.2 px
-%   i.e. 101% of the range.  Every horizontal edge aliases or fails psrMin, then
-%   falls back to the wrong guess at weight 0.2, and the global solve is dragged
-%   onto a 450 px lattice that is 31 px per step too coarse -- 250 px of error
-%   accumulated across 9 columns.
-%
-% The scale guess was simply wrong: 0.8889 is the ScanImage header value, and on
-% this rig the stage and the header disagree by ~6% (0.9462 measured).  But
-% hard-coding 0.9462 would only move the cliff, so:
-%
-% ============================== WHAT IS DIFFERENT =============================
-% 1. THE TEMPLATE IS CUT INDEPENDENTLY OF THE GUESS.  A strip is taken from the
-%    LEADING EDGE of the second tile, sized as a fraction of the EXPECTED overlap,
-%    and searched for inside a generous strip of the first tile.  The guess then
-%    only has to land within SearchRadiusPx, not within half a patch.
-% 2. normxcorr2, NOT raw phase correlation.  Linear (zero-padded) rather than
-%    circular, so there is no wraparound to alias into; normalised, so a
-%    brightness difference between tiles cannot masquerade as a shift; and the
-%    peak value is a correlation coefficient, which is an interpretable accept
-%    threshold rather than a unitless PSR.
-% 3. THE SEARCH IS EXPLICITLY BOUNDED and the bound is reported.  A residual that
-%    wants to leave the window is a FAILURE, not a silently accepted wrap.
-% 4. INITIAL PLACEMENT FROM THE STAGE when the filenames carry _x###_y### tokens,
-%    instead of a uniform step*index lattice.  Handles a non-uniform or skipped
-%    step, and is what the manual GUI already does.
-% 5. SELF-CALIBRATION.  After the pass, um/px is re-measured from the successful
-%    edges against the stage travel, and reported.  If it disagrees with the
-%    guess by more than ScaleWarnFrac you are told, with the number to paste back.
-% 6. FAILED EDGES ARE DROPPED, not kept at low weight.  A wrong edge held at
-%    weight 0.2 still pulls; 40 of them pull hard and in the same direction.
-%    Connectivity is checked instead, and a disconnected grid is an error.
-% 7. IT REPORTS. Per-edge outcome, residual distribution, post-solve edge
-%    residuals, and a QC figure -- so the next failure is diagnosable.
-%
-% Runqi Zhang / 2026-09-10
-
 clc;
 
-%% ========================= USER SETTINGS =========================
-rawDir = "E:\260804_shiver_dbh\map";   % contains ch*/avgz
+rawDir = "D:\Data\RZ\test260911";
+refChID = 3;        % registration reference. USE THE VESSEL CHANNEL -- on 260804
+                    % ch3 gives NCC 0.94 while ch1 gives 0.27-0.49.
+chUse   = [];       % channels to WRITE OUT. [] = every ch<N>\avgz folder found,
+                    % same convention as tile_deinterleave_avgz_260910. Or name
+                    % them explicitly, e.g. [1 3]. refChID is always included.
+                    % Registration is ALWAYS done on refChID alone; this only
+                    % controls which channels get stitched with those coords.
+zUse_um = []; zUseProj = [];
+%zUse_um = [-300 20]; zUseProj = [];
+rescaled_um = 1;
+stageSource = "auto";
 
-refChID   = 3; otherChID = 1;
-zUse_um     = [-300 0];   % in micron, e.g. [-300 0] -> use 0-300 micron under surface. [] = whole stack. Takes precedence over zUseProj.
-zUseProj    = [];         % raw PAGE INDICES, only used when zUse_um is [] -- the fallback for a folder with no raw tile.
-rescaled_um = 1;          % output pixel size in um. [] = keep the native pixels.
-                          % Resampled with the MEASURED per-axis scale, so one
-                          % output pixel is one micron and the mosaic is isotropic
-                          % -- which also removes the ~6% x-vs-y difference the
-                          % raw pixels carry (1.618 vs 1.524 um/px on 260804).
-stageSource = "auto";     % "auto" | "header" | "filename"
-                          % "header" = SI.hMotors.motorPosition from the raw tile
-                          % (authoritative).  "auto" uses it when every tile has
-                          % a raw file and falls back to the filename tokens.
+%%
+step_um         = 400; um_per_px_guess = 1.4815;
 
-% 260804: zoom 1.2, FOV 758.55 um, 1.4815 um/px, 600 um step -> 107 px overlap.
-% 260909: zoom 2,   FOV 455.13 um, 0.8889 um/px, 400 um step ->  93 px overlap.
-step_um         = 400;        % nominal stage step; only a fallback now
-um_per_px_guess = 1.4815;     % the ScanImage HEADER value for zoom 1.2.
-% This is a SEED, not a calibration, and it does not have to be right -- the
-% bounded search below tolerates any error up to SearchRadiusPx, and the script
-% re-measures the true value from the accepted edges and prints it.
-%
-% Seeding it with a hand-measured number would make the auto-stitcher depend on
-% a manual stitch having already been done, which defeats the point. For the
-% record the curated 260909 map gives ~0.9462 um/px (400 um of stage travel over
-% 418.75 px, 144 pairs), i.e. the header understates the field by ~6% on this
-% rig -- but that number came FROM a curation and is only used here to check the
-% self-calibration lands in the right place, never to seed it.
+placeInit    = "stage"; row_increases_up = true;
 
-placeInit    = "stage";       % "stage" (filename _x###_y### tokens) | "grid"
-% WHAT THE FILENAME TOKENS ARE.  `_x-2700_y-1350` is the ACTUAL motor position,
-% not the commanded one: auto_acq_n_shutterOFF.m moves, then reads
-% hMotors.motorPosition and prints it with %.0f.  So the only difference from
-% SI.hMotors.motorPosition in the raw header is rounding to whole microns --
-% measured at 0.49 um worst case over 36 tiles of 260804 (sd 0.30).
-%
-% That makes the filenames a sound source, which matters because an avgz tile is
-% a processed TIFF and carries no SI metadata at all; the header is only
-% available where a raw tile was kept.  Either way it is just the SEED for a
-% search that then measures the step from the images.
-row_increases_up = true;      % grid mode only: filename row index goes UP
+flipX = false; flipY = false;
 
-flipX = false;
-flipY = false;
-
-% ---- registration ----
-SearchRadiusPx   = 120;       % bound on the residual ALONG the step direction
-SearchPerpPx     = 40;        % bound ACROSS it
-HighPassSigmaPx  = 0;        % 0 = off.  See the note at the projection step.
-TemplateFrac     = 0.60;      % template width as a fraction of expected overlap
+SearchRadiusPx   = 120;
+SearchPerpPx     = 40;
+HighPassSigmaPx  = 0;
+TemplateFrac     = 0.60;
 MinTemplatePx    = 24;
-NccMin           = 0.45;      % accept: peak correlation coefficient
-ExclRadiusPx     = 15;        % uniqueness test: ignore this much around the peak
-MarginMin        = 0.02;      % accept: peak minus best rival outside that radius
-% NO peak-to-sidelobe gate.  PSR is a statistic for PHASE correlation, whose
-% surface is a sharp spike on flat noise.  A normxcorr2 surface is smooth and
-% broad, so even a perfect match sits only a few SD above its own neighbourhood:
-% carrying the old psrMin = 4 across rejected 142 of 144 edges that had ALREADY
-% passed NCC >= 0.3.  The peak VALUE is the quality measure for NCC; how far it
-% beats the best rival peak is the uniqueness measure.
+NccMin           = 0.45;
+ExclRadiusPx     = 15;
+MarginMin        = 0.02;
 subpixel         = true;
-ScaleWarnFrac    = 0.02;      % warn if the measured um/px is this far off
+ScaleWarnFrac    = 0.02;
 
-% ---- global solve ----
-PriorWeight      = 0.05;      % weight of the stage prior per tile, vs edge ~1-20
-DarkContrast     = 0.025;     % contrast index below which a tile is "nothing"
-DarkPriorBoost   = 200;       % prior weight multiplier for those -- effectively pinned
-HuberK           = 2.5;       % IRLS: residuals past this many robust SDs are cut
+PriorWeight      = 0.05;
+DarkContrast     = 0.025;
+DarkPriorBoost   = 200;
+HuberK           = 2.5;
 IrlsIters        = 6;
 
-% ---- blending / output ----
 useLinearBlending = true;
 rowsPerStrip      = 64;
-nRows_tile = [];  nCols_tile = [];    % tile_### mode grid override
+nRows_tile = [];  nCols_tile = [];
 
-writeStitched = true;         % false = coords + QC only (fast, for tuning)
-compareTo     = "";           % "stitch_manual_coords.mat", or "" to skip
-%% =================================================================
+writeStitched = true;
+compareTo     = "";
 
 refAvgzDir   = fullfile(rawDir, sprintf("ch%d", refChID),   "avgz");
-otherAvgzDir = fullfile(rawDir, sprintf("ch%d", otherChID), "avgz");
+
+% Discover channels from the folders that actually exist, rather than assuming
+% two. The deinterleaver writes one ch<N>\avgz per saved channel and the count
+% is not known until a header is read, so scanning is the only honest way.
+chFound = discover_channels(rawDir);
+if isempty(chFound)
+    error("No ch<N>%savgz folders under %s -- run the deinterleaver first.", filesep, rawDir);
+end
+if isempty(chUse)
+    chIDs = chFound;
+else
+    chIDs = intersect(chUse(:).', chFound, 'stable');
+    gone  = setdiff(chUse(:).', chFound);
+    if ~isempty(gone)
+        warning("requested channel(s) [%s] have no avgz folder -- skipped.", num2str(gone));
+    end
+end
+if ~ismember(refChID, chFound)
+    error("refChID = %d has no avgz folder (found [%s]).", refChID, num2str(chFound));
+end
+chIDs = unique([refChID, chIDs], 'stable');   % ref always written
+otherChIDs   = setdiff(chIDs, refChID, 'stable');
+otherAvgzDirs = arrayfun(@(c) fullfile(rawDir, sprintf("ch%d", c), "avgz"), ...
+                         otherChIDs, 'uni', 0);
+fprintf("[chan] found [%s], registering on ch%d, writing [%s]\n", ...
+        num2str(chFound), refChID, num2str(chIDs));
 outDir = fullfile(rawDir, "matlab_stitch");
 if ~isfolder(outDir), mkdir(outDir); end
 
-
-
 coordMat = fullfile(outDir, sprintf("stitch_coords_from_ch%d.mat", refChID));
 
-if ~isfolder(refAvgzDir),   error("Missing folder: %s", refAvgzDir); end
-if ~isfolder(otherAvgzDir), error("Missing folder: %s", otherAvgzDir); end
+if ~isfolder(refAvgzDir), error("Missing folder: %s", refAvgzDir); end
+for m = 1:numel(otherAvgzDirs)
+    if ~isfolder(otherAvgzDirs{m})
+        error("Missing folder: %s", otherAvgzDirs{m});
+    end
+end
 
-%% ========================= DISCOVER FILES (unchanged) =========================
 refFilesAll0 = list_tifs(refAvgzDir);
 if isempty(refFilesAll0), error("No TIFFs in %s", refAvgzDir); end
 
@@ -169,24 +106,19 @@ else
 end
 fprintf("[mode] %s\n", mode);
 
-[tileFileRef, tileFileOther, tileAtRC, nRows, nCols, c_of_t, rB_of_t] = ...
+[tileFileRef, tileFilesOther, tileAtRC, nRows, nCols, c_of_t, rB_of_t] = ...
     build_order(mode, refFilesAll0, okCR, okTI, col0, row0, tileIdx0, ...
-                otherAvgzDir, otherChID, row_increases_up, nRows_tile, nCols_tile);
+                otherAvgzDirs, otherChIDs, row_increases_up, nRows_tile, nCols_tile);
+
+% tileFiles{k} is the tile list for channel chIDs(k); the ref sits at index 1.
+tileFiles = [{tileFileRef}, tileFilesOther];
 nTiles = numel(tileFileRef);
 fprintf("[grid] nRows=%d nCols=%d nTiles=%d\n", nRows, nCols, nTiles);
 
-%% ========================= READ SIZE / PAGES =========================
 [H0, W0, inClass] = read_first_page_size_class(tileFileRef(1));
 nZ0 = count_tiff_pages_file(tileFileRef(1));
 fprintf("[tile] size=%dx%d, nZ=%d, class=%s\n", H0, W0, nZ0, inClass);
 
-% ---- acquisition parameters, from ONE raw tile ------------------------------
-% Zoom, field of view, pixel size, saved channels and the z axis are properties
-% of the ACQUISITION, not of a tile, so a single raw file is enough.  That is the
-% normal case when a map is copied off the rig for stitching: all the avgz tiles
-% plus one raw tile kept for its metadata.  Per-tile STAGE POSITION is separate
-% and needs every raw file -- keeping the two apart is what stops a folder with
-% one raw tile from falling back to a typed-in um/px it does not need to.
 ACQ = read_acq_params(rawDir, tileFileRef(1));
 if ACQ.ok
     fprintf("[acq]  %s\n", ACQ.src);
@@ -206,19 +138,6 @@ else
     fprintf("[acq]  no raw tile in %s -- zoom/z/channels unknown, using the typed settings\n", rawDir);
 end
 
-% ---- zUse: MICRONS of motor z, resolved to page indices ---------------------
-% zUse is a depth RANGE in microns, not page numbers, so the same setting means
-% the same tissue on a stack with a different step size or start.  It is matched
-% against SI.hStackManager.zs, the per-slice motor z -- the same convention
-% stitch_manual_gui_fast_260818 uses.  Motor z runs NEGATIVE into the brain and
-% the ventral surface is where z was zeroed, so [-300 0] is the top 300 um.
-% Order does not matter: [0 -300] is the same slab, and both ends are inclusive.
-%
-% THE AVGZ TILES CARRY NO METADATA AT ALL -- no Software tag, no ImageDescription
-% (checked).  So zs has to come from a RAW tile beside ch*/, and if there is none
-% a micron range cannot be honoured.  That is an error rather than a silent
-% fallback to all pages: quietly projecting 540 um when 300 was asked for changes
-% the picture completely and nothing in the output would say so.
 if isempty(zUse_um)
     if isempty(zUseProj)
         zUse = 1:nZ0;
@@ -232,7 +151,7 @@ if isempty(zUse_um)
     end
 else
     if ACQ.ok && ~isempty(ACQ.zs)
-        zs = ACQ.zs;  zsrc = ACQ.src;          % already read, do not re-open
+        zs = ACQ.zs;  zsrc = ACQ.src;
     else
         [zs, zsrc] = find_stack_zs(rawDir, tileFileRef(1));
     end
@@ -258,21 +177,12 @@ for t = 1:nTiles
     end
 end
 
-%% ========================= SUM PROJECTIONS =========================
 sumProj = cell(nTiles,1);
 for t = 1:nTiles
     tt = Tiff(tileFileRef(t),'r');
     S = zeros(H0,W0,'double');
     for iz = zUse, tt.setDirectory(iz); S = S + double(tt.read()); end
     tt.close();
-    % HIGH-PASS BEFORE REGISTRATION.  Each avgz tile here is itself 56 z planes,
-    % so summing all of them gives a thick projection dominated by SLOW shading --
-    % vignetting, depth falloff, a bright surface vessel smeared through the
-    % stack.  NCC is computed over the whole template, so that low-frequency
-    % component supplies most of the correlation and swamps the cell-sized detail
-    % that actually localises the match: the peak goes broad and wanders.
-    % Subtracting a Gaussian blur leaves only structure at the scale of somata and
-    % vessels, which is what carries the registration information.
     if HighPassSigmaPx > 0
         S = S - imgaussfilt(S, HighPassSigmaPx);
     end
@@ -282,14 +192,10 @@ if HighPassSigmaPx > 0
     fprintf("[proj] high-pass sigma %g px before registration\n", HighPassSigmaPx);
 end
 
-%% ========================= INITIAL PLACEMENT =========================
 [stageX, stageY, haveStage, stageSrc] = parse_stage_tokens(tileFileRef, rawDir, stageSource);
 step_px = step_um / um_per_px_guess;
 
 if placeInit == "stage" && haveStage
-    % Measured rig convention: image column runs along +stage x, image row along
-    % -stage y.  Using the per-tile stage position rather than index*step means a
-    % non-uniform or skipped step is carried exactly instead of averaged away.
     x0 = (stageX - min(stageX)) / um_per_px_guess;
     y0 = (max(stageY) - stageY)  / um_per_px_guess;
     fprintf("[init] stage from %s, %.4f um/px -> step ~%.1f px\n", ...
@@ -309,7 +215,6 @@ end
 if flipX, x0 = max(x0) - x0; end
 if flipY, y0 = max(y0) - y0; end
 
-%% ========================= EDGES =========================
 idxGrid = zeros(nRows,nCols);
 for t = 1:nTiles, idxGrid(rB_of_t(t), c_of_t(t)) = t; end
 
@@ -319,18 +224,17 @@ for rB = 1:nRows
         i = idxGrid(rB,c);
         if c < nCols
             j = idxGrid(rB,c+1);
-            E(end+1) = struct('i',i,'j',j,'dxG',x0(j)-x0(i),'dyG',y0(j)-y0(i),'axis','x'); %#ok<AGROW>
+            E(end+1) = struct('i',i,'j',j,'dxG',x0(j)-x0(i),'dyG',y0(j)-y0(i),'axis','x');
         end
         if rB < nRows
             j = idxGrid(rB+1,c);
-            E(end+1) = struct('i',i,'j',j,'dxG',x0(j)-x0(i),'dyG',y0(j)-y0(i),'axis','y'); %#ok<AGROW>
+            E(end+1) = struct('i',i,'j',j,'dxG',x0(j)-x0(i),'dyG',y0(j)-y0(i),'axis','y');
         end
     end
 end
 nE = numel(E);
 fprintf("[reg] %d edges, search +/-%d px along / +/-%d across\n", nE, SearchRadiusPx, SearchPerpPx);
 
-%% ========================= PAIRWISE NCC =========================
 dxE = zeros(nE,1); dyE = zeros(nE,1); okE = false(nE,1);
 ncc = nan(nE,1); margin = nan(nE,1); why = strings(nE,1);
 t0 = tic;
@@ -342,9 +246,6 @@ for e = 1:nE
     if ~okE(e), dxE(e) = E(e).dxG; dyE(e) = E(e).dyG; end
 end
 fprintf("[reg] %d/%d edges accepted (%.0f s)\n", nnz(okE), nE, toc(t0));
-% The NCC distribution over ALL edges, not only the accepted ones.  Without it a
-% threshold is picked blind, and "the gate is too strict" and "the data is bad"
-% look identical from the accept count alone.
 qn = prctile(ncc, [5 25 50 75 95]);
 fprintf("[reg] NCC over all %d edges: p5 %.2f  p25 %.2f  med %.2f  p75 %.2f  p95 %.2f\n", ...
         nE, qn(1), qn(2), qn(3), qn(4), qn(5));
@@ -359,7 +260,6 @@ resid = hypot(dxE - [E.dxG].', dyE - [E.dyG].');
 fprintf("[reg] residual vs guess: median %.1f px, max %.1f px (accepted edges)\n", ...
         median(resid(okE)), max(resid(okE)));
 
-%% ========================= SELF-CALIBRATION =========================
 if haveStage
     si = [E.i].'; sj = [E.j].';
     dsx = abs(stageX(sj) - stageX(si));  dsy = abs(stageY(sj) - stageY(si));
@@ -377,18 +277,6 @@ if haveStage
     end
 end
 
-%% ========================= GLOBAL SOLVE =========================
-% ---- REBUILD THE PRIOR AT THE MEASURED SCALE -------------------------------
-% The prior started life at um_per_px_guess, which is the header value and is
-% wrong here by 8%.  A prior that is stretched 8% is not a mild bias: it pulls
-% against every correct edge, and pinning a dark tile to it puts that tile
-% confidently in the wrong place.  Now that the edges have measured the scale,
-% the prior is rebuilt on it -- PER AXIS, because x and y disagree by ~6% (the
-% resonant and galvo axes are not calibrated together).
-%
-% This does not make the prior circular.  It is still the STAGE that says where
-% each tile is; the edges only supply the microns-to-pixels conversion, which is
-% one number per axis over the whole mosaic, not a per-tile adjustment.
 if haveStage && exist('uX','var') && ~isempty(uX) && ~isempty(uY)
     sxPx = median(uX);  syPx = median(uY);
     x0 = (stageX - min(stageX)) / sxPx;
@@ -398,15 +286,6 @@ if haveStage && exist('uX','var') && ~isempty(uX) && ~isempty(uY)
     fprintf('[prior] rebuilt at the measured scale: x %.4f, y %.4f um/px\n', sxPx, syPx);
 end
 
-% ---- DARK TILES ------------------------------------------------------------
-% A tile with no structure has no opinion about where it belongs, and it should
-% not be given one.  Contrast index = (p99.5 - p50)/p50 on the reference
-% projection: how far the bright tail rises above the tile's own background,
-% which is scale-free, so it compares tiles of different exposure.  Anything
-% below DarkContrast is pinned hard to its stage position -- typically the map's
-% corners, where the field ran off the tissue.  Pinning is better than leaving
-% them free: a dark tile usually still produces ONE spurious edge somewhere, and
-% a single unopposed bad edge will drag an otherwise unconstrained tile far.
 contentIdx = zeros(nTiles,1);
 for t = 1:nTiles
     q = prctile(sumProj{t}(:), [50 99.5]);
@@ -421,76 +300,30 @@ for t = find(isDark).'
     fprintf('         %s  (%.3f)\n', tileFileRef(t), contentIdx(t));
 end
 
-% LOOP CLOSURE, before solving anything.  Every 2x2 block of tiles is a cycle:
-% going A->B->D must land where A->C->D lands.  The deviation needs no ground
-% truth and no solve, and it is the cleanest evidence that a set of edges is
-% mutually inconsistent -- which is the failure mode a per-edge quality score
-% cannot see, because each edge can look confident on its own and still be wrong.
 loop_closure_report(E, dxE, dyE, okE, idxGrid, nRows, nCols);
 
 ii = [E(okE).i].'; jj = [E(okE).j].';
 assert(~isempty(ii), 'every edge was rejected -- nothing to solve');
 
-% CONNECTIVITY IS REPORTED, NOT REQUIRED.  A map this size covers millimetres and
-% much of it is background: on the 260909 9x9 the median edge NCC was 0.09, not
-% because the gate was strict but because a pair of blank strips carries nothing
-% to register.  Demanding one edge-connected graph makes an empty corner fatal.
-% The stage prior is what covers those tiles -- image evidence where it exists,
-% the recorded stage position where it does not -- so an isolated tile is a note,
-% not a failure.
 report_connectivity(nTiles, ii, jj, tileFileRef);
 
-% Weight by the correlation coefficient: 1 at the accept threshold, 20 at a
-% perfect match.  PSR is gone, so it cannot set the weights either.
 w = 1 + 19 * max(0, (ncc(okE) - NccMin) / max(eps, 1 - NccMin));
 
-% ROBUST SOLVE.  81 tiles are 162 unknowns and 144 edges are 288 equations, so
-% the system is overdetermined 1.8x -- and that redundancy is the whole reason a
-% bad edge is survivable.  Plain least squares spreads one bad edge over the
-% whole mosaic; IRLS lets the solution itself decide which edges are lying and
-% demote them, re-solving until the weights settle.
-%
-% The gauge comes from a WEAK PRIOR pulling every tile toward its stage position
-% rather than from anchoring tile 1.  Anchoring one tile fixes the origin but
-% leaves the mosaic free to drift over long distances -- errors accumulate along
-% whatever path the edges happen to form.  A weak prior on all 81 costs nothing
-% where the edges agree and quietly holds the far corner where they do not.
 [x, y, solveInfo] = solve_robust(nTiles, ii, jj, dxE(okE), dyE(okE), w, ...
                                  x0, y0, priorW, HuberK, IrlsIters);
 x = x - min(x);  y = y - min(y);
 fprintf("[solve] IRLS %d iters, %d/%d edges downweighted below half\n", ...
         IrlsIters, solveInfo.nDown, numel(ii));
 
-% Post-solve residual: how well the solved positions honour the edges they were
-% built from.  This is the number that says whether the stitch is trustworthy --
-% the pre-solve residual only says how wrong the guess was.
 pr = hypot((x(jj)-x(ii)) - dxE(okE), (y(jj)-y(ii)) - dyE(okE));
 fprintf("[solve] post-solve edge residual: median %.2f px, 95th %.2f, max %.2f\n", ...
         median(pr), prctile(pr,95), max(pr));
 
-%% ================= RESAMPLE THE MOSAIC TO rescaled_um ==========================
-% The tiles are acquired at ~1.6 um/px and the two axes differ by ~6% (x 1.618,
-% y 1.524 here), so a native-pixel mosaic is neither round-numbered nor square.
-% Rescaling to rescaled_um with the MEASURED per-axis scale fixes both at once: the
-% output is isotropic, and one pixel is one micron, so any distance read off it
-% is already in microns.
-%
-% The measured scale is used, not the header's, because the header is 8% off --
-% rescaling by it would stamp that error permanently into the pixels.
-% BOTH COORDINATE SPACES ARE KEPT.  The solve happens in RAW pixels -- NCC runs
-% on the original tiles and nothing is resampled before the measurement -- so the
-% raw-pixel solution is the primary result.  The rescaled one is derived from it.
-% Saving only the space that happened to be written left a consumer unable to
-% tell which one it had.
-%   x_raw / y_raw  with H0, W0      -> mosaic at the true acquired pixel size,
-%                                      original pixels, no interpolation
-%   x_um  / y_um   with Hn, Wn      -> mosaic at rescaled_um, isotropic, one
-%                                      pixel = one micron
 Hn = H0; Wn = W0;
 if ~exist('sxPx','var'), sxPx = um_per_px_guess; syPx = um_per_px_guess; end
 x_raw = x;  y_raw = y;
 if ~isempty(rescaled_um) && rescaled_um > 0 && haveStage && exist('sxPx','var')
-    fx_s = sxPx / rescaled_um;          % output px per input px, per axis
+    fx_s = sxPx / rescaled_um;
     fy_s = syPx / rescaled_um;
     Wn = max(1, round(W0 * fx_s));
     Hn = max(1, round(H0 * fy_s));
@@ -503,28 +336,28 @@ elseif ~isempty(rescaled_um) && rescaled_um > 0
              'positions, or no accepted edges) -- writing at native pixel size.']);
 end
 
-if ~exist('x_um','var')      % no rescale requested: the two spaces coincide
+if ~exist('x_um','var')
     x_um = x_raw; y_um = y_raw;
 end
 outW = ceil(max(x) + Wn);  outH = ceil(max(y) + Hn);
 writtenSpace = "raw";
 if ~isempty(rescaled_um) && (Hn ~= H0 || Wn ~= W0), writtenSpace = "rescaled"; end
 
-% The filename says which pixel space the file is in.  A mosaic at the acquired
-% pixel size and one resampled to 1 um/px look identical in a viewer but differ
-% in every distance read off them, so they must not be able to share a name --
-% and with distinct names both can sit in the folder at once.
 fprintf("[stitch] mosaic %dx%d\n", outH, outW);
 
-save(coordMat, 'x','y','tileFileRef','tileFileOther','c_of_t','rB_of_t', ...
+% tileFileRef is kept because stitch_manual_gui_260910.m:198 reads it.
+% tileFiles/chIDs are the N-channel form; tileFileOther is a legacy alias for
+% the first non-ref channel so any older consumer still loads.
+if numel(tileFiles) > 1, tileFileOther = tileFiles{2}; else, tileFileOther = strings(0,1); end
+save(coordMat, 'x','y','tileFileRef','tileFileOther','tileFiles','chIDs', ...
+     'refChID','c_of_t','rB_of_t', ...
      'nRows','nCols','zUse','zUse_um','zUseProj','stageSrc', ...
-     'x_raw','y_raw','H0','W0', ...          % raw-pixel space (the solve)
-     'x_um','y_um','Hn','Wn','rescaled_um','writtenSpace', ...  % rescaled space
+     'x_raw','y_raw','H0','W0', ...
+     'x_um','y_um','Hn','Wn','rescaled_um','writtenSpace', ...
      'outH','outW','step_um','um_per_px_guess','sxPx','syPx', ...
      'row_increases_up','flipX','flipY','mode','E','dxE','dyE','okE','ncc','margin','pr');
 fprintf("[save] %s\n", coordMat);
 
-%% ========================= CHECK AGAINST CURATION =========================
 cur = fullfile(outDir, compareTo);
 if compareTo ~= "" && isfile(cur)
     compare_to_curated(cur, x, y, tileFileRef, W0, H0);
@@ -532,22 +365,9 @@ end
 
 qc_figure(outDir, E, dxE, dyE, okE, ncc, pr, isx, x, y, x0, y0, W0, H0, refChID);
 
-%% ========================= WRITE =========================
 if ~writeStitched
     fprintf("[skip] writeStitched=false -- coords and QC only\n"); return
 end
-% BOTH SPACES ARE WRITTEN, for every channel.  They answer different questions:
-% "_raw" keeps the acquired pixels untouched -- nothing interpolated, which is
-% what anything quantitative needs -- while "_rescale" is isotropic at
-% rescaled_um, so a distance can be read straight off the image.  One solve
-% produces both; only the rendering differs, so there is no reason to force a
-% choice up front and a re-run to change it.
-% The tag carries the PIXEL SIZE, not just the word: "raw_1.6um" and
-% "rescaled_1um" say what a pixel of that file actually is, which is the one
-% thing you need when setting the scale in ImageJ and the one thing a bare
-% "raw" / "rescale" does not tell you.  The raw figure is the MEASURED pixel,
-% rounded to 0.1 um -- the axes differ by ~6%, so it is a label, not a spec;
-% sxPx / syPx in the coords file carry the exact per-axis values.
 rawTag = sprintf("raw_%gum", round(mean([sxPx syPx]), 1));
 SPACES = struct('tag', {rawTag}, 'x', {x_raw}, 'y', {y_raw}, 'H', {H0}, 'W', {W0});
 if ~isempty(rescaled_um) && (Hn ~= H0 || Wn ~= W0)
@@ -578,8 +398,9 @@ for sp = 1:numel(SPACES)
         end
     end
 
-    for cc = [refChID otherChID]
-        if cc == refChID, tfiles = tileFileRef; else, tfiles = tileFileOther; end
+    for ci = 1:numel(chIDs)
+        cc     = chIDs(ci);
+        tfiles = tileFiles{ci};
         fn = fullfile(outDir, sprintf("stitched_ch%d_avgz_%s.tif", cc, SP.tag));
         if isfile(fn), delete(fn); end
         write_stitched_from_tilefiles(fn, tfiles, place, oH, oW, SP.H, SP.W, zUse, ...
@@ -591,22 +412,11 @@ for sp = 1:numel(SPACES)
 end
 end
 
-%% ============================ REGISTRATION ==================================
 function [dx, dy, ok, peak, margin, why] = refine_edge_ncc(A, B, dxG, dyG, ...
         Ralong, Rperp, tfrac, tmin, nccMin, exclR, marginMin, subpix)
-%REFINE_EDGE_NCC  Bounded normalised cross-correlation of one tile pair.
-%
-% THE TEMPLATE IS CUT FROM THE LEADING EDGE OF B AND ITS SIZE COMES FROM THE
-% EXPECTED OVERLAP, NOT FROM THE GUESSED POSITION.  That is the whole fix: the
-% old code cut its patch at the guess, so the representable shift range shrank
-% exactly as the guess got worse, and a guess wrong by more than half the
-% predicted overlap could never be corrected.  Here the guess only selects how
-% big a strip to take and where to centre the search window.
 
 dx = dxG; dy = dyG; ok = false; peak = NaN; margin = NaN; why = "";
 
-% Normalise the edge so the step is non-negative along its dominant axis; the
-% answer is un-swapped at the end.  Avoids four near-identical index blocks.
 swapped = false;
 horiz = abs(dxG) >= abs(dyG);
 if (horiz && dxG < 0) || (~horiz && dyG < 0)
@@ -640,15 +450,12 @@ if std(T(:)) < eps || std(As(:)) < eps, why = "flat patch"; return; end
 C  = normxcorr2(T, As);
 [th_, tw_] = size(T);
 [ah_, aw_] = size(As);
-Cv = C(th_:ah_, tw_:aw_);          % fully-overlapping positions only
+Cv = C(th_:ah_, tw_:aw_);
 if isempty(Cv), why = "no valid overlap"; return; end
 
 [peak, k] = max(Cv(:));
 [fr, fc]  = ind2sub(size(Cv), k);
 
-% Uniqueness: how far the peak beats the best RIVAL peak outside an exclusion
-% radius.  On a smooth NCC surface the immediate neighbourhood is nearly as high
-% as the peak by construction, so the rival has to be sought beyond it.
 msk = true(size(Cv));
 msk(max(1,fr-exclR):min(end,fr+exclR), max(1,fc-exclR):min(end,fc+exclR)) = false;
 if nnz(msk) > 10, margin = peak - max(Cv(msk)); else, margin = Inf; end
@@ -667,9 +474,6 @@ else
     dyN = rs0 + (fr + sr) - 2;
 end
 
-% The bound is enforced, not assumed: a peak that wants to sit outside the
-% window is a rejection.  Silently accepting it is how the old code turned a
-% wrapped alias into a confident wrong answer.
 if abs(dxN - dxG) > Ralong + 1 || abs(dyN - dyG) > max(Ralong,Rperp) + 1
     why = "peak outside the search window"; return
 end
@@ -696,13 +500,6 @@ sr = max(-1,min(1,sr));  sc = max(-1,min(1,sc));
 end
 
 function comp = report_connectivity(n, ii, jj, names)
-%REPORT_CONNECTIVITY  Component structure of the accepted-edge graph.
-%
-% Reports the LARGEST component, not connectivity to tile 1.  Tile 1 is the
-% acquisition-order start, i.e. a CORNER, and a corner is the likeliest tile in
-% the whole map to be empty -- on 260804 it is the dimmest tile in the reference
-% channel.  Measuring the graph from it said "35 of 36 disconnected" about a
-% mosaic whose other 35 tiles were perfectly connected to each other.
 lab = zeros(n,1); comp = 0;
 adj = cell(n,1);
 for e = 1:numel(ii)
@@ -714,7 +511,7 @@ for s = 1:n
     while ~isempty(stack)
         v = stack(end); stack(end) = [];
         for u = adj{v}
-            if ~lab(u), lab(u) = comp; stack(end+1) = u; end %#ok<AGROW>
+            if ~lab(u), lab(u) = comp; stack(end+1) = u; end
         end
     end
 end
@@ -731,9 +528,6 @@ end
 end
 
 function report_connectivity_old(n, ii, jj)
-% A grid held together by too few accepted edges solves to something, and that
-% something is a superposition of rigid pieces floating relative to each other.
-% lsqminnorm will not complain; this does.
 seen = false(n,1); seen(1) = true;
 adj = cell(n,1);
 for e = 1:numel(ii)
@@ -743,7 +537,7 @@ stack = 1;
 while ~isempty(stack)
     v = stack(end); stack(end) = [];
     for u = adj{v}
-        if ~seen(u), seen(u) = true; stack(end+1) = u; end %#ok<AGROW>
+        if ~seen(u), seen(u) = true; stack(end+1) = u; end
     end
 end
 if ~all(seen)
@@ -755,16 +549,6 @@ end
 end
 
 function [x, y, info] = solve_robust(n, ii, jj, dx, dy, w0, px, py, priorW, huberK, nIter)
-%SOLVE_ROBUST  Weighted least squares over the tile graph, with IRLS and a prior.
-%
-% Unknowns are the 2n tile positions; each edge contributes two equations
-% x_j - x_i = dx and y_j - y_i = dy; each tile contributes two weak equations
-% x_t = priorX_t, y_t = priorY_t.  The prior both fixes the gauge and stops
-% long-range drift, so no tile has to be anchored.
-%
-% IRLS: solve, measure each edge's residual against the solution, rescale the
-% weights by a Huber factor, repeat.  An edge that disagrees with the consensus
-% of its neighbours loses its vote instead of bending the mosaic around itself.
 px = px(:) - min(px);  py = py(:) - min(py);
 w  = w0(:);
 info = struct('nDown', 0, 'sigma', NaN);
@@ -772,8 +556,6 @@ for it = 1:nIter
     [x, y] = solve_once(n, ii, jj, dx, dy, w, px, py, priorW);
     rx = (x(jj)-x(ii)) - dx;   ry = (y(jj)-y(ii)) - dy;
     r  = hypot(rx, ry);
-    % Robust scale from the residuals themselves: the MAD, not the SD, so a few
-    % badly wrong edges cannot inflate the very threshold meant to catch them.
     sig = 1.4826 * median(abs(r - median(r)));
     if sig < 1e-6, sig = max(1e-6, median(r)); end
     f = min(1, huberK * sig ./ max(r, eps));
@@ -805,7 +587,6 @@ x = p(1:2:end);  y = p(2:2:end);
 end
 
 function loop_closure_report(E, dxE, dyE, okE, idxGrid, nRows, nCols)
-%LOOP_CLOSURE_REPORT  Consistency of every 2x2 cycle of tiles.
 key = containers.Map('KeyType','char','ValueType','double');
 for e = 1:numel(E)
     key(sprintf('%d_%d', E(e).i, E(e).j)) = e;
@@ -822,7 +603,7 @@ for rB = 1:nRows-1
         if ~all(okE([e1 e2 e3 e4])), continue; end
         ex = (dxE(e1) + dxE(e2)) - (dxE(e3) + dxE(e4));
         ey = (dyE(e1) + dyE(e2)) - (dyE(e3) + dyE(e4));
-        err(end+1) = hypot(ex, ey); %#ok<AGROW>
+        err(end+1) = hypot(ex, ey);
     end
 end
 if isempty(err)
@@ -851,17 +632,15 @@ p = lsqminnorm(Wmat*A, Wmat*b);
 x = p(1:2:end);  y = p(2:2:end);
 end
 
-%% ============================== REPORTING ===================================
 function compare_to_curated(curFile, x, y, tileFileRef, W0, H0)
 C = load(curFile);
 if ~isfield(C,'x') || ~isfield(C,'files'), fprintf("[check] %s has no x/files\n", curFile); return; end
-% stitch_manual_gui_fast_260818 folds the nudge into x already.
 [~, bnA] = cellfun(@(s) fileparts(char(s)), num2cell(tileFileRef), 'uni', 0);
 [~, bnC] = cellfun(@(s) fileparts(char(s)), num2cell(C.files),     'uni', 0);
 [tf, loc] = ismember(bnA, bnC);
 if nnz(tf) < 3, fprintf("[check] could not match tiles to the curated set\n"); return; end
 dx = (x(tf) - C.x(loc(tf)));  dy = (y(tf) - C.y(loc(tf)));
-dx = dx - median(dx);  dy = dy - median(dy);      % placement is gauge-free
+dx = dx - median(dx);  dy = dy - median(dy);
 d  = hypot(dx, dy);
 fprintf(['[check] vs curated (%d tiles, common translation removed):\n' ...
          '        median %.1f px, 95th %.1f px, max %.1f px  (tile is %dx%d)\n'], ...
@@ -918,18 +697,19 @@ title(ax,'guess vs measured','FontWeight','normal'); hold(ax,'off');
 
 title(tl, sprintf('auto-stitch QC  --  ch%d  --  %d/%d edges accepted', refCh, nnz(okE), numel(E)), ...
       'FontWeight','bold','Interpreter','none');
-% outDir is a STRING, so [base '.png'] builds a 1x2 STRING ARRAY instead of
-% concatenating, and exportgraphics reports "unrecognized inputs". Use +.
 base = fullfile(outDir, sprintf('autostitch_qc_ch%d', refCh));
 exportgraphics(f, base + ".png", 'Resolution', 170, 'BackgroundColor','white');
 close(f);
 fprintf("[qc]   %s.png\n", base);
 end
 
-%% ========================= ORDER / NAMING (unchanged logic) =================
-function [tileFileRef, tileFileOther, tileAtRC, nRows, nCols, c_of_t, rB_of_t] = ...
+function [tileFileRef, tileFilesOther, tileAtRC, nRows, nCols, c_of_t, rB_of_t] = ...
     build_order(mode, refFilesAll0, okCR, okTI, col0, row0, tileIdx0, ...
-                otherAvgzDir, otherChID, row_increases_up, nRows_tile, nCols_tile)
+                otherAvgzDirs, otherChIDs, row_increases_up, nRows_tile, nCols_tile)
+% otherAvgzDirs is a CELL of avgz folders, one per non-reference channel, and
+% tileFilesOther comes back as a matching cell of tile lists. The pairing rule is
+% identical for every channel, so it is applied in a loop rather than written
+% once for a hard-coded "other".
 if mode == "colrow"
     refFilesAll = refFilesAll0(okCR);
     col = col0(okCR); row = row0(okCR);
@@ -960,19 +740,22 @@ if mode == "colrow"
     end
     tileFileRef = refFilesAll(tileOrder);
 
-    tileFileOther = strings(nTiles,1);
-    for t=1:nTiles
-        [~, bn, ext] = fileparts(tileFileRef(t));
-        cand = fullfile(otherAvgzDir, bn + ext);
-        if isfile(cand), tileFileOther(t) = cand;
-        else
-            [c0,r0,tf] = parse_colrow_from_name(tileFileRef(t));
-            if ~tf, error("Cannot parse col/row from %s", tileFileRef(t)); end
-            tileFileOther(t) = find_by_colrow(otherAvgzDir, c0, r0);
+    tileFilesOther = cell(1, numel(otherAvgzDirs));
+    for m = 1:numel(otherAvgzDirs)
+        tf_m = strings(nTiles,1);
+        for t=1:nTiles
+            [~, bn, ext] = fileparts(tileFileRef(t));
+            cand = fullfile(otherAvgzDirs{m}, bn + ext);
+            if isfile(cand), tf_m(t) = cand;
+            else
+                [c0,r0,tf] = parse_colrow_from_name(tileFileRef(t));
+                if ~tf, error("Cannot parse col/row from %s", tileFileRef(t)); end
+                tf_m(t) = find_by_colrow(otherAvgzDirs{m}, c0, r0);
+            end
         end
+        if any(tf_m==""), error("Some ch%d tiles missing.", otherChIDs(m)); end
+        tileFilesOther{m} = tf_m;
     end
-    if any(tileFileOther==""), error("Some ch%d tiles missing.", otherChID); end
-    % remap tileAtRC to acquisition-order indices
     inv = zeros(numel(refFilesAll),1); inv(tileOrder) = 1:nTiles;
     tileAtRC = arrayfun(@(v) inv(v), tileAtRC);
 else
@@ -996,19 +779,22 @@ else
         tileAtRC(rB_here, c_here) = t;
     end
     tileFileRef = refFilesAll;
-    otherFilesAll0 = list_tifs(otherAvgzDir);
-    K0 = numel(otherFilesAll0); okO = false(K0,1); tileIdxO0 = nan(K0,1);
-    for i=1:K0
-        [k,tf] = parse_tileidx_from_name(otherFilesAll0(i));
-        if tf, okO(i) = true; tileIdxO0(i) = k; end
+    tileFilesOther = cell(1, numel(otherAvgzDirs));
+    for m = 1:numel(otherAvgzDirs)
+        otherFilesAll0 = list_tifs(otherAvgzDirs{m});
+        K0 = numel(otherFilesAll0); okO = false(K0,1); tileIdxO0 = nan(K0,1);
+        for i=1:K0
+            [k,tf] = parse_tileidx_from_name(otherFilesAll0(i));
+            if tf, okO(i) = true; tileIdxO0(i) = k; end
+        end
+        otherFilesAll = otherFilesAll0(okO); tileIdxO = tileIdxO0(okO);
+        [tileIdxOSorted, ordO] = sort(tileIdxO(:), 'ascend');
+        otherFilesAll = otherFilesAll(ordO);
+        if ~isequal(tileIdxOSorted(:), tileIdxSorted(:))
+            error("Tile index mismatch between ch%d and ch(ref).", otherChIDs(m));
+        end
+        tileFilesOther{m} = otherFilesAll;
     end
-    otherFilesAll = otherFilesAll0(okO); tileIdxO = tileIdxO0(okO);
-    [tileIdxOSorted, ordO] = sort(tileIdxO(:), 'ascend');
-    otherFilesAll = otherFilesAll(ordO);
-    if ~isequal(tileIdxOSorted(:), tileIdxSorted(:))
-        error("Tile index mismatch between channels.");
-    end
-    tileFileOther = otherFilesAll;
 end
 
 c_of_t = zeros(numel(tileFileRef),1); rB_of_t = zeros(numel(tileFileRef),1);
@@ -1019,14 +805,24 @@ for rr = 1:nRows
 end
 end
 
+function ch = discover_channels(rawDir)
+% Channel IDs that actually have a ch<N>\avgz folder under rawDir, ascending.
+% Matches the deinterleaver's output layout; the number of channels is not
+% knowable in advance, so it is read off the filesystem rather than assumed.
+ch = [];
+d = dir(char(rawDir));
+d = d([d.isdir]);
+for i = 1:numel(d)
+    tok = regexp(d(i).name, '^ch(\d+)$', 'tokens', 'once');
+    if isempty(tok), continue; end
+    if isfolder(fullfile(rawDir, d(i).name, "avgz"))
+        ch(end+1) = str2double(tok{1}); %#ok<AGROW>
+    end
+end
+ch = sort(unique(ch));
+end
+
 function A = read_acq_params(rawDir, refTile)
-%READ_ACQ_PARAMS  Acquisition parameters from ONE raw tile.
-%
-% z positions, zoom, field of view, pixel size, saved channels, slice and frame
-% counts.  All are properties of the acquisition, so one raw file carries them
-% for the whole map -- which is what makes a folder of avgz tiles plus a single
-% raw tile fully self-describing.  Deliberately separate from the per-tile stage
-% position, which needs every raw file.
 A = struct('ok', false, 'src', "", 'zs', [], 'zoom', NaN, 'fovUm', NaN, ...
            'umPerPx', NaN, 'channelSave', [], 'nSlices', NaN, 'framesPerSlice', NaN);
 c = dir(fullfile(rawDir, "*.tif"));
@@ -1054,8 +850,6 @@ A.framesPerSlice = si_num(s, "SI.hStackManager.framesPerSlice");
 px  = si_num(s, "SI.hRoiManager.pixelsPerLine");
 fov = si_mat(s, "SI.hRoiManager.imagingFovUm");
 if ~isempty(fov) && size(fov,2) >= 2 && isfinite(px) && px > 0
-    % FOV form, not PIX_BASE/zoom: it already carries scanAngleMultiplier and
-    % any scan rotation, so it stays right on a non-square or shifted field.
     A.fovUm   = max(fov(:,1)) - min(fov(:,1));
     A.umPerPx = A.fovUm / px;
 end
@@ -1085,18 +879,11 @@ rows = split(erase(string(tok{1}), ["[", "]"]), ";");
 for i = 1:numel(rows)
     d = str2double(split(strtrim(replace(rows(i), ",", " ")))); d = d(~isnan(d)).';
     if i == 1, M = zeros(numel(rows), numel(d)); end
-    M(i, 1:numel(d)) = d; %#ok<AGROW>
+    M(i, 1:numel(d)) = d;
 end
 end
 
 function [zs, src] = find_stack_zs(rawDir, refTile)
-%FIND_STACK_ZS  Per-slice motor z, from a raw tile beside the ch*/ folders.
-%
-% Prefers the raw tile matching the reference tile's own col/row, so the z axis
-% belongs to a tile that is actually in the mosaic.  Falls back to any raw tile
-% in the folder: the stack parameters come from one acquisition script and are
-% identical across tiles, which is checked by comparing against a second file
-% when one exists.
 zs = []; src = "";
 c = dir(fullfile(rawDir, "*.tif"));
 if isempty(c), return; end
@@ -1137,14 +924,6 @@ zs = v(~isnan(v));
 end
 
 function [sx, sy, have, src] = parse_stage_tokens(files, rawDir, want)
-%PARSE_STAGE_TOKENS  Per-tile stage position, from the header if it exists.
-%
-% SI.hMotors.motorPosition in the RAW tile is the authoritative record of where
-% the stage went.  The _x###_y### in a filename is the SAME quantity, just
-% rounded: auto_acq_n_shutterOFF.m moves, then reads hMotors.motorPosition and
-% prints %.0f.  Measured on 260804 the two agree to within 0.49 um over 36 tiles
-% (sd 0.30) -- rounding alone.  The header is preferred only for that last
-% fraction of a micron; a stalled or nudged stage IS recorded either way.
 n = numel(files); sx = nan(n,1); sy = nan(n,1); src = "filename";
 
 if want ~= "filename"
@@ -1155,7 +934,6 @@ if want ~= "filename"
         rawPaths = string(fullfile({raws.folder}, {raws.name}));
         for k = 1:n
             [~, bn] = fileparts(files(k));
-            % avgz basename is the raw basename plus _ch<N>_avgz
             stem = regexprep(bn, '_ch\d+_avgz$', '');
             hit  = find(startsWith(rawNames, stem + "."), 1);
             if isempty(hit)
@@ -1256,7 +1034,6 @@ if isempty(c), error("No file for col%d row%d in %s", col, row, folder); end
 fn = string(fullfile(c(1).folder, c(1).name));
 end
 
-%% ============================== IO / BLEND ==================================
 function [H, W, cls] = read_first_page_size_class(fn)
 t = Tiff(fn,'r'); A = t.read(); t.close();
 H = size(A,1); W = size(A,2); cls = string(class(A));
@@ -1304,9 +1081,6 @@ for zi = 1:numel(zUse)
     for t = 1:nT
         rd{t}.setDirectory(zUse(zi));
         P = double(rd{t}.read());
-        % Resample to the output pixel size BEFORE the sub-pixel shift, because
-        % the shift is expressed in OUTPUT pixels -- doing it the other way round
-        % would apply an output-scale offset to input-scale data.
         if size(P,1) ~= H0 || size(P,2) ~= W0
             P = imresize(P, [H0 W0], 'bicubic');
         end

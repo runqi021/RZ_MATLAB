@@ -1,8 +1,11 @@
 ---
 name: project-autostitch-ncc-260910
 description: "NChan_vol_stitch_zUse_260910.m -- why the old auto-stitcher failed, and the bounded-NCC + stage-prior + IRLS design that replaced it"
-metadata:
+metadata: 
+  node_type: memory
   type: project
+  originSessionId: c2f9c05c-e8f0-4298-9f58-57d55a9092fe
+  modified: 2026-09-12T01:51:48.383Z
 ---
 
 **`260910-map-registration\NChan_vol_stitch_zUse_260910.m`** — rewrite of the registration
@@ -115,6 +118,26 @@ Untested: the volume-interleaved branch (falls back to the indexed path with a w
 single-channel datasets, and the other 35 tiles.
 Headroom left: avgz-only reads at 77 MB/s against the drive's 129 — the read-side twin
 of the same per-page TIFF overhead, worth ~1.5x if ever wanted.
+
+## N-channel generalisation of the STITCHER (2026-09-11, later)
+`NChan_vol_stitch_zUse_260910.m` assumed exactly two channels: `refChID` plus a
+single `otherChID`. It now follows the deinterleaver's convention —
+**`chUse = []` means every `ch<N>\avgz` folder found**, or name them explicitly;
+`refChID` is always included. `discover_channels()` scans the filesystem, since
+the channel count is not knowable in advance.
+- `tileFileOther` (one list) -> **`tileFiles`** (cell, one list per channel) plus
+  **`chIDs`**. The pairing rule was always channel-agnostic, so it is now a loop.
+- The write loop emits `stitched_ch<N>_avgz_<space>.tif` for every channel.
+- **Registration is still done on `refChID` ALONE** — `chUse` only controls which
+  channels get stitched with those coordinates. That separation matters because
+  ch1 here is near-featureless.
+- Compatibility: `stitch_manual_gui_260910.m:198` reads `C.tileFileRef`, still
+  saved; `tileFileOther` kept as a legacy alias for the first non-ref channel.
+- Verified: discovery returns `[1 3 10]` on a tree with ch1/ch3/ch10 avgz plus
+  decoys (`ch2` without avgz, `notch/avgz`, `chX/avgz`). **Not yet run on real
+  multi-channel data.**
+- The `to-send\` copies are now STALE — they are comment-stripped and need
+  `strip_comments.py` re-run.
 
 ## N-channel generalisation of the deinterleaver (2026-09-11)
 `ch1_id`/`ch2_id` are GONE. One setting now: `chUse = []` = every channel the file saved.
