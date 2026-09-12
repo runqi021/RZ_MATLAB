@@ -100,3 +100,36 @@ correction, stronger in background than somata).
 
 Related: [[project-ao-motion-correction-260911]],
 [[reference-galil-position-registers]], [[feedback-measure-raw-not-converted]].
+
+## Why the first and last plane of every DM stack are BLACK (diagnosed 2026-09-12)
+**Not an optics, DM or focus fault, and the reported fit was never affected.**
+
+The demo requested z -15 to +25 um -- the stroke computed against a command limit of
+**1.0** -- while the loop guards at **`CMD_LIMIT = 0.95`**. The two end planes fall in
+that 0.05 gap:
+
+| plane | z | coeff | max\|cmd\| | sent |
+|---|---|---|---|---|
+| 1  | -15 | -2.25 | **0.9602** | no |
+| 41 | +25 | +3.76 | **0.9589** | no |
+
+Over by 0.0102 and 0.0089. Both were correctly SKIPPED by the guard -- and then
+`stackDM = zeros(size(stackStage),'single')` meant those slices went into the .mat and
+the TIFF as **literal zeros**. Verified on `..._1842.mat`: the all-zero planes are
+exactly `find(~gotDM)` = [1 41], nothing else. The analysis loop already skipped
+`~gotDM`, so gain, slope and matched-z were all computed only from real planes.
+
+This is the same fact as the "usable -2.10 to +3.61" line above, seen from the other
+side: the REQUEST exceeded the usable range by exactly one plane at each end.
+
+**Fixed both ways** in `dm_zstack_demo_260911.m`:
+1. `zList` is now TRIMMED to what the DM can actually reach at `CMD_LIMIT`, computed
+   from `baseline + c*Z2C(ROW_DEFOC,:)` before the sweep, so nothing is skipped.
+   For this baseline that is z -14.0 to +24.0 um, 39 planes.
+2. Any plane still not acquired is DROPPED from the saved stack and TIFF
+   (`stack(:,:,gotDM)`) instead of being written as zeros, with a warning naming it.
+
+**Rules worth keeping:** derive a requested range from `CMD_LIMIT`, never from the +-1
+stroke. And never let pre-allocated zeros reach a saved stack -- a black plane inside a
+z-stack is worse than a missing one, because anything that later registers into that
+stack can match it.

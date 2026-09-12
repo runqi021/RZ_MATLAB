@@ -86,6 +86,25 @@ fprintf('arming resonant scanner (%.1f s), held on for the run...\n', RES_ARM_SE
 wait_s(RES_ARM_SEC);
 
 zList = (ZMIN_UM : ZSTEP_UM : ZMAX_UM);
+
+% TRIM THE REQUEST TO WHAT THE DM CAN ACTUALLY REACH.
+% ZMIN/ZMAX above are the stroke computed against a command limit of 1.0, but the
+% guard below is CMD_LIMIT = 0.95, so the two end planes sit in the gap between
+% them: on 2026-09-11 they needed 0.9602 and 0.9589, over by 0.010 and 0.009.
+% They were skipped -- correctly -- and the pre-allocated zeros went into the
+% stack and the TIFF as two black planes. Decide the range here instead, so
+% nothing is skipped and there is nothing to leave behind.
+cAll   = zList / GAIN_UM_PER_COEFF;
+mxAll  = arrayfun(@(cc) max(abs(baseline(:).' + cc*Z2C(ROW_DEFOC,:))), cAll);
+reach  = mxAll <= CMD_LIMIT;
+if ~all(reach)
+    fprintf(['  trimming %d plane(s) the DM cannot reach at CMD_LIMIT %.2f: ' ...
+             'z %s um (needed max|cmd| up to %.4f)\n'], nnz(~reach), CMD_LIMIT, ...
+             mat2str(zList(~reach)), max(mxAll(~reach)));
+    zList = zList(reach);
+    fprintf('  z range is now %+.1f to %+.1f um, %d planes\n', ...
+            zList(1), zList(end), numel(zList));
+end
 nZ    = numel(zList);
 fprintf('baseline %s, max|cmd| %.3f | %d planes, %g um steps, gain %.3f um/coeff\n', ...
         BASELINE_VAR, max(abs(baseline)), nZ, ZSTEP_UM, GAIN_UM_PER_COEFF);
@@ -174,8 +193,17 @@ save(matOut, 'stackStage','stackDM','zList','zStageMeas','zEnc','cUsed','gotDM',
      'ZMIN_UM','ZMAX_UM','NFRAMES','CHANNEL','z0','-v7.3');
 fprintf('\nsaved %s\n', matOut);
 
-write_tif(fullfile(OUT_DIR, sprintf('demo_STAGE_zstack_%s.tif', STAMP)), stackStage);
-write_tif(fullfile(OUT_DIR, sprintf('demo_DM_zstack_%s.tif',    STAMP)), stackDM);
+% A plane that was never acquired is still the pre-allocated ZEROS. Writing it
+% would put a black slice in the middle of a z-stack, which is worse than a
+% missing one: anything that later registers into this stack can match it.
+% The trim above should mean this never fires, but a send can still fail.
+if ~all(gotDM)
+    warning('dm_zstack:skipped', ...
+        '%d plane(s) never acquired -- dropping them from the saved stack and TIFF: z %s', ...
+        nnz(~gotDM), mat2str(zList(~gotDM)));
+end
+write_tif(fullfile(OUT_DIR, sprintf('demo_STAGE_zstack_%s.tif', STAMP)), stackStage(:,:,gotDM));
+write_tif(fullfile(OUT_DIR, sprintf('demo_DM_zstack_%s.tif',    STAMP)), stackDM(:,:,gotDM));
 fprintf(['wrote both stacks as TIFFs -- open them side by side and step through;\n' ...
          'they should show the same structure entering and leaving focus.\n']);
 end
