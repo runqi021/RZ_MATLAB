@@ -91,7 +91,9 @@
 
 ## Stitching
 - [**AO real-time motion correction**](project_ao_motion_correction_260911.md) — SLAP2-style closed loop using the ALPAO DM, NOT new galvos; SI2018b already ships MotionManager; rig has NO X galvo and NO FastZ; stroke budget + Z2C rows 1/2/3 = tiltY/tipX/defocus; **nothing run on hardware**
-- [**Map acquisition pair 260910**](project_auto_acq_260910.md) — auto_acq_260910.m + acq_pause_queue.m; 10s/tile idle removed, live pause/brake/abort; **UNTESTED on the rig as of 2026-09-11**
+- [**Map acquisition pair 260910**](project_auto_acq_260910.md) — auto_acq_260910.m + acq_pause_queue.m; 10s/tile idle removed, live pause/brake/abort; **RUNS ON THE RIG, confirmed working 2026-09-11**. auto_acq now opens the control window itself. Open: no onCleanup, so Ctrl+C leaves `keepResonantScannerOn` true
+- [**Stage backlash MEASURED 260911**](project_stage_backlash_260911.md) — z: 0.1 µm encoder, backlash **0.205 ± 0.022 µm** flat over 5–100 µm steps → keep z-stacks unidirectional. **x/y have NO encoder readout**, their backlash is unmeasured and needs the image or a dial indicator. Open: `hSI.hMotors.backlashCompensation` unchecked
+- [**motorPosition is an open-loop step count**](reference_galil_position_registers.md) — `motorPosition` = Galil `TD` = pulses generated, NOT measured position; it echoes the command and **cannot detect backlash**. `TP`/`RP` reachable via `hMotors.hMotor(1).hLSC`. `stage_backlash_260911.m` probes whether TP is live
 - [ScanImage rig control + auto-acq](reference_scanimage_rig_control.md) — D:\RZ_ScanImage_script; `scanimage` gives hSI/hSICtl/hAOROIctrl; moveStartRelative is ABSOLUTE; filename x/y is the real motor position; AO = deformable mirror + Shack-Hartmann
 - [Auto-stitch: bounded NCC + stage prior](project_autostitch_ncc_260910.md) — why the old phase-corr stitcher aliased; use the VESSEL channel; rebuild the prior at the measured scale
 - [Manual stitch GUI](project_manual_stitch_gui.md) — coordinate-based 2D stitcher; anchor-fit pins 2-3 tiles → solves stage→px transform → snaps all
@@ -104,6 +106,9 @@
 - [ChAT_analysis breath alignment](project_chat_analysis_breath_alignment.md) — breath cam 2P-triggered frame/frame; stored camera_fps=50.7 is bogus; toss-30-then-truncate
 - [Breath rate across sessions](project_breathing_freq_across_sessions.md) — per-session 1/ITI from DLC; fps=50.68 from timestamps NOT 90
 - [260728 vglut2 + vessel depth series](project_260728_vglut2_vessel_depth.md) — `fileparts` on folder paths silently drops any FOV with a dot; vessel filename z = DEPTH vs SI `zs` = MOTOR
+
+## Machines
+- [**dklab rig (DESKTOP-VBHRRVC)**](project_machine_dklab_rig.md) — **IS a rig**: PXIe-7961R + PEX-292144 (ALPAO) + NI-DAQmx all present, so acq and AO CAN run here. Repo `D:\Data\RZ\RZ-tools\RZ_MATLAB`, ScanImage on the **Desktop** not `D:\RZ_ScanImage_script`; memory dir `D--Data-RZ` so **launch from `D:\Data\RZ`**; NO git/conda/ffmpeg; MATLAB R2024a + R2017b. Other memories' absolute paths are the Admin machine's. **Do not edit anything under the ScanImage folder.**
 
 ## Pipeline Setup & Data Organization
 - [Data folder structure](project_data_folder_structure.md) — calcium (phys/) vs behavior (falling_edge/) two-folder layout
@@ -131,4 +136,5 @@
 - [Don't pester about git tracking](feedback_git_tracking_priority.md) — what matters is the code on disk being good
 - [Never gamma exported videos](feedback_never_gamma_video.md) — 2P video frames get LINEAR contrast only; gamma OK on static figures
 - [**MATLAB OpenGL export stubs**](reference_matlab_opengl_export_stubs.md) — NVIDIA path fails ~1% of exportgraphics PNGs as 9,223-byte blanks or leaves a STALE file; force `opengl('software')`; verify batches by timestamp AND size, never by count
+- [**Measure raw, not converted**](feedback_measure_raw_not_converted.md) — save RAW device units and convert at analysis; a readback that echoes the command measures nothing; carry a null control; make the metric a DIFFERENCE; don't average across regimes; detrend before quoting scatter
 - [Vectorize over loops; make it fast](feedback_vectorize_over_loops.md) — tic/toc the bottleneck, batch as chunked matrix ops

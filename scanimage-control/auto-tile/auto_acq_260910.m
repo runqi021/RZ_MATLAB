@@ -112,11 +112,21 @@ hScan2D.keepResonantScannerOn = true;
 
 nTiles = numCols*numRows;
 ctrl_init(nTiles, pauseEveryN);
-if ~isempty(pauseEveryN) && pauseEveryN > 0
-    fprintf('scheduled pauses every %d tiles: %s\n', pauseEveryN, ...
-            mat2str(pauseEveryN:pauseEveryN:nTiles));
+
+% The control window is opened HERE, not left to the user. The two files were
+% written as independent scripts and that split was a trap: the run would reach
+% a scheduled pause with no window on screen and nothing to press CONTINUE with.
+ctrl_open_gui();
+
+% Print the ACTUAL queue, not the requested schedule. ctrl_init MERGES the new
+% every-N schedule into whatever pauseAt survived the last run, so the two can
+% differ -- printing the request was misleading.
+qAt = ctrl_queue();
+if isempty(qAt)
+    fprintf('pause queue: none\n');
+else
+    fprintf('pause queue: %s\n', mat2str(qAt));
 end
-fprintf('run acq_pause_queue in another window for live control\n');
 
 fprintf('arming resonant scanner (%.1f s)...\n', ResArmSec);
 waitAndServe(ResArmSec);
@@ -281,6 +291,39 @@ if ~isempty(everyN) && everyN > 0
     S.pauseAt = unique([S.pauseAt(:).' everyN:everyN:nTiles]);
 end
 setappdata(0,'rz_acq_ctrl',S);
+end
+
+function ctrl_open_gui()
+% Open the live-control window from the run itself.
+%
+% Resolution order matters. acq_pause_queue.m sits NEXT TO this file, and the
+% rig's current folder is not guaranteed to be that folder, so put this file's
+% own directory on the path first. mfilename('fullpath') is valid inside a local
+% function of a script (verified on R2024a), and returns '' only if the script
+% was pasted rather than run by name -- hence the isempty guard.
+here = fileparts(mfilename('fullpath'));
+if ~isempty(here) && exist(fullfile(here,'acq_pause_queue.m'),'file') == 2
+    addpath(here);
+end
+if exist('acq_pause_queue','file') ~= 2
+    warning('auto_acq:noCtrlWindow', ...
+        'acq_pause_queue.m not found -- running with NO live control');
+    return
+end
+% A figure failure must never kill an acquisition that is otherwise fine: the
+% run degrades to the un-pausable behaviour instead of erroring out mid-map.
+try
+    acq_pause_queue();
+    drawnow;
+catch ME
+    warning('auto_acq:ctrlWindowFailed', ...
+        'control window did not open (%s) -- running with NO live control', ME.message);
+end
+end
+
+function q = ctrl_queue()
+S = getappdata(0,'rz_acq_ctrl');
+q = S.pauseAt;
 end
 
 function tf = ctrl_should_pause(tile)

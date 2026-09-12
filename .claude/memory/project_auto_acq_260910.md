@@ -1,16 +1,33 @@
 ---
 name: project-auto-acq-260910
-description: New map acquisition pair auto_acq_260910.m + acq_pause_queue.m — written 2026-09-10/11, control logic tested, NOT yet run on the rig
-metadata:
+description: "New map acquisition pair auto_acq_260910.m + acq_pause_queue.m — written 2026-09-10/11, control logic tested, NOT yet run on the rig"
+metadata: 
+  node_type: memory
   type: project
+  originSessionId: c2f9c05c-e8f0-4298-9f58-57d55a9092fe
+  modified: 2026-09-11T23:32:55.629Z
 ---
 
 `D:\RZ_ScanImage_script\auto_acq_260910.m` + `acq_pause_queue.m` replace
 `auto_acq_n_shutterOFF.m` for snake-tile map acquisition. Written 2026-09-10/11.
 
-**Status as of 2026-09-11: the control logic is tested off-rig; every hardware
-call is UNEXECUTED.** User knows and will test later. Do not describe it as
-validated. Shakedown plan agreed: `numCols=2; numRows=1; doLaser=false`.
+**That path is the ADMIN machine's.** On the dklab rig (DESKTOP-VBHRRVC) there is no
+`D:\RZ_ScanImage_script`; the only copy is the repo's
+`scanimage-control\auto-tile\`, and ScanImage lives on the Desktop. That rig has
+working NI-DAQmx + PXIe-7961R, so **the shakedown can actually be run there** —
+see [[project-machine-dklab-rig]].
+
+**Status 2026-09-11 (evening): IT HAS NOW RUN ON THE RIG AND WORKS.** Tested by
+the user on DESKTOP-VBHRRVC after the control-window auto-open fix below; their
+words: "its working perfectly now". This supersedes every earlier note in this
+file that calls it unexecuted or untested — the hardware path is live.
+
+What that run does NOT settle, because it was not reported either way: stage
+landing accuracy against `posTolUm = 2` (the script only warns on a miss, so a
+clean log means no tile exceeded 2 um — worth confirming it never warned),
+whether an aborted tile's TIFF is truncated-but-readable, and whether BRAKE /
+ABORT were exercised live as opposed to PAUSE / CONTINUE. Ask before claiming any
+of those. See "Verification done" below for what was proven off-rig.
 
 What changed from the original:
 - 10 s/tile of pure idle (`pause(1)` x10 inside the sub-move loop, stage already
@@ -27,6 +44,26 @@ What changed from the original:
   `ResArmSec = 2` before resuming. **The one genuinely new hardware interaction.**
 - Live control via root appdata `rz_acq_ctrl` (not a global, no handle either
   side holds) — the two windows can start in either order.
+
+## The control window now opens ITSELF (2026-09-11, first real rig run)
+The two files were written as independent scripts and the user was expected to
+launch `acq_pause_queue` by hand in another window. On the first rig run that bit:
+the run reached a pause with no window on screen and nothing to press CONTINUE
+with; the only way out was Ctrl+C. `auto_acq_260910.m` now calls `ctrl_open_gui()`
+right after `ctrl_init`, which addpaths its OWN folder (`mfilename('fullpath')`
+works inside a local function of a script — verified R2024a) and calls
+`acq_pause_queue()` inside a try/catch, so a figure failure degrades to "no live
+control" instead of killing the map. `acq_pause_queue` already reuses an existing
+window rather than duplicating, so the auto-open is idempotent.
+Also: the startup line now prints `ctrl_queue()` — the ACTUAL `pauseAt` — because
+`ctrl_init` MERGES the new every-N schedule into whatever survived the last run,
+so the real queue and the requested schedule can differ.
+
+**`keepResonantScannerOn` is NOT restored on Ctrl+C.** Line ~33 sets it true;
+the restore to `prevKeepOn` only happens at the normal end or the
+`grabDidNotStart` error path. A Ctrl+C out of `ctrl_wait_for_continue` skips all
+of them, and the flag is PERSISTED to the SI class data file — so the scanner is
+left running indefinitely. There is no `onCleanup` in this script. Worth adding.
 
 Stop semantics: PAUSE = tile boundary, nothing lost. BRAKE = `hSI.abort()`
 mid-grab, CONTINUE **re-runs that tile** (the truncated file would otherwise look
@@ -80,9 +117,10 @@ Verified by reading the ScanImage source:
 scanner off/on/arm, BRAKE -> 7 grabs with `col01_row00` written twice and exactly 1
 `hSI.abort()`, ABORT -> stops at the tile, 1 abort, scanner left OFF, `acqState` idle.
 
-Still unverified, all hardware: real scanner timing, whether an aborted tile's TIFF is
-truncated-but-readable, and actual stage landing accuracy vs `posTolUm = 2`.
-Shakedown agreed: `numCols = 2; numRows = 1; doLaser = false`.
+That was the off-rig mock evidence. **The rig run on 2026-09-11 evening then
+succeeded** — see the status block at the top of this file. Still not
+independently confirmed: an aborted tile's TIFF being truncated-but-readable,
+and stage landing accuracy vs `posTolUm = 2`.
 
 ## Files moved 2026-09-11
 `D:\RZ_ScanImage_script\` reorganised to `auto-tile\` (the live commented pair),

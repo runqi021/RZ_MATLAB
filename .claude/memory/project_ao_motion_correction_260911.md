@@ -5,7 +5,7 @@ metadata:
   node_type: memory
   type: project
   originSessionId: 0c9f4688-9d18-4f93-9896-d7dc4ce25892
-  modified: 2026-09-11T19:39:54.229Z
+  modified: 2026-09-11T21:22:50.962Z
 ---
 
 Goal: real-time (closed-loop) motion correction on the 2P rig, prompted by Kaspar
@@ -107,6 +107,57 @@ the corrector must invert the WHOLE matrix, not use three scalars). Baseline res
 clamped mirror is not producing the Zernike you asked for and would silently bend the fit.
 Still needs rewriting to register into the stack rather than measure lateral and axial
 separately.
+
+**IT DOES NOT RUN AS WRITTEN — THREE SEPARATE FAULTS, found 2026-09-11 by reading
+the real install on the rig (`C:\Users\dklab\Desktop\SI2018bR1_2018-12-19_4a9264c4fc`).**
+All three land BEFORE any `senddata`, so it fails safe — but it fails, and fault 2 is
+the dangerous one if the other two are fixed without it.
+
+**1. `Z2C_FILE` path is wrong (line 43, dies first, at `load` on line 66.)** It points at
+`D:\RZ_ScanImage_script\SI2018bR1_...` — the Admin machine's layout. On this rig the
+install is on the **Desktop**. See [[project-machine-dklab-rig]].
+
+**2. `get_baseline` reads a method THAT DOES NOT EXIST, and the fallback wipes the
+aberration correction.** It calls `hAO.hAOdata.getDMdata()`; `getDMdata` appears
+**nowhere in the install**. AOdata's real getters are `getsystemDMdata`,
+`getsampleDMdata`, `getcombinedDMdata`. So the `try` always throws, the `catch` warns,
+and `baseline = zeros(1,97)`. Consequences, all silent:
+- every step is measured about a FLAT mirror, not about the correction;
+- `CMD_LIMIT` headroom is computed against `max|baseline| = 0`, so the range report
+  (line 154) is wrong and oversized steps pass the clip check;
+- **`onCleanup` then sends `zeros(1,97)`, actively flattening the DM** and discarding
+  whatever correction was loaded.
+The script's own warning anticipates exactly this — it will fire every single run.
+Do not "just ignore the warning".
+  Worse, the three real getters look broken too: they open with
+  `[nROIs,Nzerused] = size(obj.systemWFdata,2)`, and `[a,b] = size(x,2)` **errors** in
+  MATLAB (verified on R2024a: "Incorrect number of output arguments"). That is
+  ScanImage-side code — **do not edit it**, just don't route the baseline through it.
+
+**THE CORRECT BASELINE SOURCE IS THE BASE WORKSPACE**, which is what this lab already
+does by hand everywhere in the install:
+`hAOROIctrl.hDMctrl.senddata(DMcommand_sys_aber_cor_930)` — the variable is loaded from
+the SystemCorrection `.mat`, not read back from the DM. `DMctrl` caches nothing
+(properties are just `hDM`, `Gain`, `serialName`), so **there is genuinely no read-back
+path**; the baseline has to be the variable you loaded.
+
+**The add-on-top pattern is already established practice on this rig**, which de-risks
+the whole plan: `Layer4_aberration_correction.m:20`
+`senddata(DMcommand_spherical + DMcommand_sys_aber_cor_930)`, and better,
+`system_aberration_correction1.m:33` `senddata(DMcommand_defocus + DMcommand_sys_aber_cor_930)`
+— **defocus deliberately added on top of the system correction, already done here.**
+`Layer4:34` `DMcommand_spherical = sample_real_index*Z2C(5,:)` is the single-row scaling
+the calib script uses. Confirms `senddata` takes a **1x97 row**.
+
+**3.** Line 80 calls
+`get_um_per_px(hSI)`, which is **not defined anywhere in the file** — the helpers are
+`get_um_per_px_mdf` and `stage_ruler`. `stage_ruler` is defined and never called.
+MATLAB errors at line 80, *before* the z-stack and before any `senddata`, so it fails
+safe — but it fails. Related unit bug behind it: both helpers return a **1x2** vector
+(per axis), while line 81's `fprintf('%.4f')` and line 126's `d(2)*um_per_px` both
+assume a **scalar**. Decide which ruler is wanted (the memo above argues for
+`stage_ruler`, and for working in px so the unit cancels), then fix both together.
+Also: `hann` needs the Signal Processing Toolbox.
 
 Analysis helpers tested against synthetic data with known answers. **Two findings:**
 - `phase_shift` had an **off-by-one**: MATLAB indexes the zero-shift peak at (1,1), so every
