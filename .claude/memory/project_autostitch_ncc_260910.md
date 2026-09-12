@@ -5,7 +5,7 @@ metadata:
   node_type: memory
   type: project
   originSessionId: c2f9c05c-e8f0-4298-9f58-57d55a9092fe
-  modified: 2026-09-12T01:51:48.383Z
+  modified: 2026-09-12T01:53:01.108Z
 ---
 
 **`260910-map-registration\NChan_vol_stitch_zUse_260910.m`** — rewrite of the registration
@@ -134,8 +134,9 @@ the channel count is not knowable in advance.
 - Compatibility: `stitch_manual_gui_260910.m:198` reads `C.tileFileRef`, still
   saved; `tileFileOther` kept as a legacy alias for the first non-ref channel.
 - Verified: discovery returns `[1 3 10]` on a tree with ch1/ch3/ch10 avgz plus
-  decoys (`ch2` without avgz, `notch/avgz`, `chX/avgz`). **Not yet run on real
-  multi-channel data.**
+  decoys (`ch2` without avgz, `notch/avgz`, `chX/avgz`).
+- **RUN ON REAL MULTI-CHANNEL DATA 2026-09-11 AND IT WORKED** (user confirmed).
+  Treat the N-channel path as working, not provisional.
 - The `to-send\` copies are now STALE — they are comment-stripped and need
   `strip_comments.py` re-run.
 
