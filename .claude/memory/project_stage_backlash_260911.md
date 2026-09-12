@@ -5,7 +5,7 @@ metadata:
   node_type: memory
   type: project
   originSessionId: c2f9c05c-e8f0-4298-9f58-57d55a9092fe
-  modified: 2026-09-12T00:36:33.484Z
+  modified: 2026-09-12T00:43:22.140Z
 ---
 
 First real characterisation of the Galil stage, 2026-09-11. Scripts:
@@ -95,24 +95,24 @@ acquired by Kollmorgen 1999, now Dover Motion). Dover's FAQ confirms
 NEAT XY stages exist on the used market. So x/y encoders were an ORDER OPTION —
 this rig may or may not have them fitted.
 
-**Fastest way to settle it, better than any script:** look at how z's encoder is
-physically implemented (a housing with its own cable on the motor's rear =
-rotary; a scale strip + readhead along the stage body = linear), then look for
-the same thing on x and y. Cable count is the giveaway — a bare stepper has ONE
-cable, an encoder adds a second connector. If x/y have the hardware, this is a
-cabling / Galil-configuration problem, not a missing part.
-`stage-cal\galil_encoder_probe_260911.m` (read-only: ID, TP, TD, RP, MG of
-internals, all four axes A-D since the driver only ever queries A-C) checks the
-electrical side; its hand-push test — move the stage by hand, see if TP changes
-with the motor idle — is the decisive electrical check. **Not yet run.**
+**SETTLED 2026-09-11 by physical inspection: there are NO encoders on x/y.**
+The user looked at the stage. So the zero TP reading is not a cabling or
+configuration problem — the hardware simply is not fitted. This closes the
+question; do not reopen it or suggest re-checking.
+
+`stage_cal_260911\galil_encoder_probe_260911.m` was written to settle this
+electrically (read-only: ID, TP, TD, RP, MG of internals, all four axes A-D
+since the driver only ever queries A-C, plus a hand-push test). **It was never
+run and is no longer needed.** Kept only as a worked example of interrogating
+the Galil directly, should a controller question ever come up again.
 
 Step angle is UNCONFIRMED. The 0.78125 um/count derivation assumes the NEMA 23
 standard 1.8 deg/step (200 steps/rev); no datasheet found states it.
 
 ## Still open after all this
 - `hSI.hMotors.backlashCompensation` — never checked. One line, no motion.
-- whether x/y have encoders fitted (see above).
-- **x/y step error and backlash are entirely unmeasured.** x is the axis the
+- **x/y step error and backlash are entirely unmeasured**, and with no encoder
+  fitted the registers will never measure them. x is the axis the
   snake raster in `auto_acq_260910` actually reverses on, over ~3.6 mm. Only the
   image can measure it — phase-correlate a frame before and after a reversal.
 - position dependence / leadscrew error: untested. z's travel limit (+-300 um)
