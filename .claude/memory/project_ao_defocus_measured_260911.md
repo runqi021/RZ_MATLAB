@@ -5,7 +5,7 @@ metadata:
   node_type: memory
   type: project
   originSessionId: c2f9c05c-e8f0-4298-9f58-57d55a9092fe
-  modified: 2026-09-12T01:51:43.964Z
+  modified: 2026-09-12T01:53:27.192Z
 ---
 
 Stage 0 of [[project-ao-motion-correction-260911]] is DONE and the DM demonstrably
@@ -76,6 +76,13 @@ robust result, sub-micron every time.
   PSF differs slightly with coefficient. **Harmless for motion correction** (what
   matters is imaging the right PLANE, and 0.65 um RMS says it does) but it would
   matter for acquiring z-stacks with the DM.
+
+## NEXT STEPS (agreed 2026-09-11, end of session)
+1. **Repeat the z-modulation demo on BRAIN TISSUE.** All four FOVs so far were a
+   static test sample. Tissue scatters and the PSF degrades with depth, so both
+   the gain and the 0.73 um residual need confirming in the real medium. Same
+   script, `dm_zstack_demo_260911.m`, nothing to change but the sample.
+2. **Then** design the breathing experiment. Not started, deliberately.
 
 ## What this means for the project
 The DM has ~-14/+24 um of axial authority at kHz bandwidth, linear, with no new
