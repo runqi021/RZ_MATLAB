@@ -1,0 +1,279 @@
+<title>Breath Motion Atlas</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Serif:ital,wght@0,400;0,600;1,400&display=swap">
+<style>
+:root{
+  --ground:#f4f6f7; --panel:#ffffff; --panel-2:#eef1f3;
+  --ink:#171b21; --ink-2:#414a55; --muted:#6d7883; --rule:#d8dee3;
+  --accent:#1f6f8b;
+  --good:#2c7a62; --mid:#8f6a1c; --poor:#9c4f3e;
+  --serif:"IBM Plex Serif",Georgia,serif;
+  --sans:"IBM Plex Sans",-apple-system,Segoe UI,sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,Menlo,monospace;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --ground:#11141a; --panel:#181d24; --panel-2:#1f252e;
+  --ink:#e4e8ec; --ink-2:#b3bcc6; --muted:#8592a0; --rule:#2b333d;
+  --accent:#5eaec6;
+  --good:#69c4a4; --mid:#d4ad55; --poor:#dd8f7c;
+}}
+:root[data-theme="dark"]{
+  --ground:#11141a; --panel:#181d24; --panel-2:#1f252e;
+  --ink:#e4e8ec; --ink-2:#b3bcc6; --muted:#8592a0; --rule:#2b333d;
+  --accent:#5eaec6;
+  --good:#69c4a4; --mid:#d4ad55; --poor:#dd8f7c;
+}
+*{box-sizing:border-box}
+body{background:var(--ground);color:var(--ink);font-family:var(--sans);
+  font-size:15px;line-height:1.55;-webkit-font-smoothing:antialiased}
+.wrap{max-width:1240px;margin:0 auto;padding:40px 24px 72px;display:flex;flex-direction:column;gap:32px}
+
+header{display:flex;flex-direction:column;gap:10px;border-bottom:2px solid var(--ink);padding-bottom:20px}
+.eyebrow{font-family:var(--mono);font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--accent)}
+h1{font-family:var(--serif);font-weight:600;font-size:clamp(28px,4.4vw,42px);line-height:1.1;
+   margin:0;text-wrap:balance;letter-spacing:-.015em}
+.sub{color:var(--ink-2);max-width:68ch;margin:0;font-size:16px}
+.sub em{font-family:var(--serif);font-style:italic}
+.num{font-family:var(--mono);font-variant-numeric:tabular-nums;font-weight:500;color:var(--ink)}
+
+/* --- acquisition ladder --- */
+.ladder{border:1px solid var(--rule);background:var(--panel)}
+.ladder h2{font-family:var(--sans);font-size:12px;font-weight:600;letter-spacing:.08em;
+  text-transform:uppercase;color:var(--muted);margin:0;padding:14px 18px 0}
+.ladder .lead{margin:4px 18px 14px;color:var(--ink-2);font-size:14px;max-width:74ch}
+.rung{display:grid;grid-template-columns:minmax(150px,1.1fr) 74px 1fr 62px;gap:14px;
+  align-items:center;padding:11px 18px;border-top:1px solid var(--rule)}
+.rung .what{display:flex;flex-direction:column;gap:1px}
+.rung .name{font-weight:600;font-size:13.5px}
+.rung .cost{font-size:11.5px;color:var(--muted)}
+.rung .dly{font-family:var(--mono);font-size:12px;color:var(--ink-2);text-align:right;
+  font-variant-numeric:tabular-nums}
+.rung .trk{height:14px;background:var(--panel-2);border:1px solid var(--rule);position:relative}
+.rung .fil{position:absolute;inset:0 auto 0 0;background:var(--accent)}
+.rung.is-now .fil{background:var(--muted)}
+.rung .pct{font-family:var(--mono);font-size:15px;font-weight:600;text-align:right;
+  font-variant-numeric:tabular-nums}
+.rung.is-now .pct{color:var(--muted)}
+
+.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(196px,1fr));gap:1px;
+  background:var(--rule);border:1px solid var(--rule)}
+.tile{background:var(--panel);padding:15px 17px;display:flex;flex-direction:column;gap:9px}
+.tile .g{display:flex;align-items:baseline;justify-content:space-between;gap:8px}
+.tile .gn{font-family:var(--serif);font-size:19px;font-weight:600}
+.tile .gc{font-family:var(--mono);font-size:11px;color:var(--muted)}
+.tile dl{margin:0;display:grid;grid-template-columns:1fr auto;gap:3px 10px;font-size:12.5px}
+.tile dt{color:var(--muted)}
+.tile dd{margin:0;font-family:var(--mono);font-variant-numeric:tabular-nums;text-align:right}
+.tile dd.hi{color:var(--accent);font-weight:600}
+
+.controls{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+.controls .lab{font-family:var(--mono);font-size:11px;letter-spacing:.1em;text-transform:uppercase;
+  color:var(--muted);margin-right:2px}
+#filters{display:flex;flex-wrap:wrap;gap:8px}
+button.chip{font-family:var(--mono);font-size:12px;padding:5px 11px;border:1px solid var(--rule);
+  background:var(--panel);color:var(--ink-2);cursor:pointer;transition:.13s}
+button.chip:hover{border-color:var(--accent);color:var(--ink)}
+button.chip[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);color:var(--panel)}
+button.chip:focus-visible,th button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+.tablewrap{overflow-x:auto;border:1px solid var(--rule);background:var(--panel)}
+table{border-collapse:collapse;width:100%;font-size:13px}
+thead th{position:sticky;top:0;background:var(--panel-2);z-index:2;text-align:right;
+  padding:0;border-bottom:1px solid var(--rule);white-space:nowrap}
+thead th:first-child,thead th:nth-child(3),thead th:nth-child(4){text-align:left}
+th button{all:unset;cursor:pointer;display:block;width:100%;padding:8px 11px;
+  font-family:var(--mono);font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;
+  color:var(--muted);box-sizing:border-box}
+th button:hover{color:var(--ink)}
+th[aria-sort] button{color:var(--accent)}
+th.grp button{color:var(--accent)}
+th button .ar{opacity:.75;font-size:9px}
+td{padding:7px 11px;border-bottom:1px solid var(--rule);text-align:right;
+  font-family:var(--mono);font-variant-numeric:tabular-nums;white-space:nowrap}
+td.t{text-align:left;font-family:var(--sans)}
+td.rec{font-family:var(--mono);font-size:11.5px;color:var(--muted);max-width:270px;
+  overflow:hidden;text-overflow:ellipsis;text-align:left}
+tbody tr:hover td{background:var(--panel-2)}
+.gtag{display:inline-block;font-family:var(--mono);font-size:11px;padding:1px 7px;
+  border:1px solid var(--rule);background:var(--ground)}
+
+.bar{display:flex;align-items:center;gap:7px;justify-content:flex-end}
+.bar .track{width:46px;height:6px;background:var(--panel-2);border:1px solid var(--rule);position:relative}
+.bar .fill{position:absolute;left:0;top:0;bottom:0}
+.v-good .fill{background:var(--good)} .v-mid .fill{background:var(--mid)} .v-poor .fill{background:var(--poor)}
+.v-good .n{color:var(--good)} .v-mid .n{color:var(--mid)} .v-poor .n{color:var(--poor)}
+.bar .n{font-weight:500;min-width:34px}
+
+.legend{display:flex;flex-wrap:wrap;gap:16px;font-size:12.5px;color:var(--muted);font-family:var(--mono)}
+.legend span{display:flex;align-items:center;gap:6px}
+.sw{width:11px;height:11px;display:inline-block}
+
+.notes{display:grid;grid-template-columns:repeat(auto-fit,minmax(262px,1fr));gap:22px;
+  border-top:1px solid var(--rule);padding-top:22px}
+.notes h3{font-family:var(--sans);font-size:12px;font-weight:600;letter-spacing:.07em;
+  text-transform:uppercase;color:var(--accent);margin:0 0 7px}
+.notes p{margin:0;font-size:13.5px;color:var(--ink-2);max-width:60ch}
+.notes code{font-family:var(--mono);font-size:12px;background:var(--panel-2);padding:1px 4px}
+.notes em{font-family:var(--serif);font-style:italic}
+footer{font-family:var(--mono);font-size:11.5px;color:var(--muted);border-top:1px solid var(--rule);
+  padding-top:16px;display:flex;flex-wrap:wrap;gap:6px 18px}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+
+<div class="wrap">
+<header>
+  <div class="eyebrow">Ventral surface archive &middot; 150 recordings &middot; 5 genotypes</div>
+  <h1>Breath Motion Atlas</h1>
+  <p class="sub">What the closed-loop DM corrector would remove from each recording's axial motion,
+  and how far four changes to the acquisition push it. The brain is dragged by the chest, so the chest
+  trace sets the <em>time scale</em> the loop has to keep up with &mdash; and delay is the only lever.</p>
+</header>
+
+<div class="ladder">
+  <h2>Acquisition ladder &mdash; median across 150 recordings</h2>
+  <p class="lead">The loop leaves <span class="num">2&thinsp;sin(&pi;&thinsp;f&thinsp;&tau;)</span> of the
+  motion, so everything comes down to shortening &tau;. Each rung is cumulative.</p>
+  <div id="rungs"></div>
+</div>
+
+<div class="tiles" id="tiles"></div>
+
+<div class="controls">
+  <span class="lab">Genotype</span>
+  <span id="filters"></span>
+</div>
+
+<div class="tablewrap">
+  <table>
+    <thead><tr id="hrow"></tr></thead>
+    <tbody id="tbody"></tbody>
+  </table>
+</div>
+
+<div class="legend">
+  <span><i class="sw" style="background:var(--good)"></i> over 80% removed</span>
+  <span><i class="sw" style="background:var(--mid)"></i> 60&ndash;80% removed</span>
+  <span><i class="sw" style="background:var(--poor)"></i> under 60% removed</span>
+  <span>&mdash; sort any column; click a genotype to filter</span>
+</div>
+
+<div class="notes">
+  <div><h3>What the four columns are</h3><p><code>now</code> is the loop as it ran on 2026-09-13:
+  512&times;256 at 58.3&nbsp;Hz, measured effective delay 1.46 frames = 25.0&nbsp;ms. <code>+gx</code>
+  extrapolates the disturbance instead of the residual, taking the delay to one frame. <code>110Hz</code>
+  and <code>122Hz</code> add 128 lines, the second with the flyback at its 126&nbsp;&micro;s floor.</p></div>
+  <div><h3>What 128 lines costs</h3><p>Either 2:1 pixels (0.946&times;1.89&nbsp;&micro;m, keeping the
+  484&times;242&nbsp;&micro;m field) or a 484&times;121&nbsp;&micro;m field (keeping square pixels). Same
+  frame rate either way &mdash; it depends only on line count, not on scan amplitude.</p></div>
+  <div><h3>Why prediction is not the answer</h3><p><code>ceiling</code> is the most a perfect
+  breath-<em>synchronised</em> predictor could remove, set by how much breaths actually repeat. For most
+  genotypes it sits <em>below</em> what feedback already achieves &mdash; only Vgat breathes regularly
+  enough for prediction to compete.</p></div>
+  <div><h3>Measured vs modelled</h3><p>Rate, period, rise, period&nbsp;CV and wave&nbsp;var are
+  <em>measured</em> from each recording. Every removal percentage is <em>modelled</em> &mdash; that
+  recording's own spectrum pushed through the loop's transfer function. The model is anchored on the rig's
+  measured 0.5&ndash;8&nbsp;Hz sweep and is untested above it.</p></div>
+</div>
+
+<footer>
+  <span>Source: <code>breath_pc1.mat</code> and <code>breath_insp_start_pc1.mat</code> per recording</span>
+  <span>D:\Ventral_surface_summary</span>
+  <span>Loop: dm_loop_validate_260913.m</span>
+</footer>
+</div>
+
+<script>
+const ROWS = [["ChAT","0124","IO","roi3_R_-1000_140_2x_34lp_512x256_00001",399,2.14,467,167,15.3,31.4,0.82,55.6,70.6,83.5,85.1,68.6],["ChAT","0521","IO","roi7_8x_x-1150y100z-35_3000f_25lp_00001",71,0.71,1400,333,4.0,28.8,0.99,71.6,81.1,89.3,90.4,71.2],["ChAT","0521","cell1","roi5_7x_x-1200y200z-30_3000f_23lp_00001",73,0.75,1333,267,4.6,27.7,0.96,70.3,80.2,88.9,89.9,72.3],["ChAT","0522","IO","roi3_6x_x-700y600z-25_3000f_16lp_00001",116,1.2,833,167,21.6,46.0,1.84,61.4,74.3,85.5,86.9,54.0],["ChAT","0522","cell1","roi3_8x_x-1070y730z0_3000f_15lp_00001",39,0.42,2400,300,11.9,43.3,0.51,74.9,83.4,90.7,91.6,56.7],["ChAT","0523","cell1","roi1_4x_x-900y700z-15_6000f_13lp_00001",148,0.77,1300,233,21.5,60.7,1.15,64.5,76.4,86.7,88.0,39.3],["ChAT","0524","IO","ROI3_5x_3000f_14lp_00001",65,0.68,1467,367,6.2,48.5,1.5,65.4,76.9,86.9,88.2,51.5],["ChAT","0826","roi1_5x_6000f_00001","roi1_5x_6000f_00001",67,0.34,2900,300,17.7,45.9,0.19,79.3,86.4,92.4,93.1,54.1],["ChAT","0826","roi2_6x_6000f_00001","roi2_6x_6000f_00001",74,0.39,2533,400,17.9,60.3,0.24,77.7,85.4,91.8,92.6,39.7],["Sert","0721","cell1","ro1_2x_x1018y1130_z10_20lp_6000f_00001",74,0.38,2633,300,7.7,31.1,1.18,70.4,80.3,88.9,90.0,68.9],["Sert","0721","cell1","ro1_2x_x1018y1130_z15_20lp_6000f_00001",77,0.39,2567,267,8.5,35.0,1.22,69.3,79.6,88.5,89.6,65.0],["Sert","0721","cell1","ro1_2x_x1018y1130_z25_26lp_6000f_00001",78,0.39,2567,267,9.3,30.5,1.33,68.9,79.3,88.3,89.4,69.5],["Sert","0721","cell3","ro3_2.5x_x450y1500_z-15_28.5lp_6000f_00003",85,0.43,2333,267,8.5,38.4,1.35,67.5,78.3,87.8,89.0,61.6],["Sert","0721","cell3","ro3_4x_x700y-1233_z-10_24.5lp_6000f_00001",85,0.42,2367,233,11.1,29.8,0.72,71.0,80.8,89.2,90.3,70.2],["Sert","0721","cell4","ro4_7x_x0y400_z0_36.5lp_3000f_00001",102,0.51,1967,267,10.0,35.4,1.41,65.3,76.9,87.0,88.2,64.6],["Sert","0721","cell5","ro5_1.6x_x1200y-400_z0_26lp_6000f_00001",104,0.54,1867,267,11.0,40.3,1.48,66.1,77.4,87.2,88.5,59.7],["Sert","0721","cell6","ro6_1.6x_x1200y-700_z0_26lp_6000f_00001",106,0.54,1867,300,11.2,43.0,1.33,66.2,77.5,87.3,88.6,57.0],["Sert","0721","cell7","ro7_1.6x_x1000y-1000_z0_26lp_6000f_00001",64,0.52,1936,277,8.6,35.8,1.29,65.7,77.0,87.0,88.2,64.2],["Sert","0721","cell7","roi7_1.8x_x-1000-1000_z0_16lp_3000f_00001",56,0.74,1345,238,12.9,51.9,0.51,66.3,77.7,87.5,88.7,48.1],["Sert","0828","cell1","roi1_z-10_2x_3000f_13lp_00001",108,1.15,867,167,14.9,39.9,2.37,55.0,70.0,83.1,84.7,60.1],["Sert","0828","cell1","roi1_z-15_2x_3000f_13lp_00001",102,1.07,934,133,18.9,48.4,3.15,53.1,68.6,82.2,84.0,51.6],["Sert","0828","cell1","roi1_z-5_2x_3000f_13lp_00001",108,1.15,867,167,17.5,41.6,2.41,55.1,70.0,83.1,84.7,58.4],["Sert","0829","cell01","roi11_2x_z0_12lp_3000f_00001",210,2.14,467,167,17.9,39.8,4.13,47.6,65.0,80.2,82.1,60.2],["Sert","0829","cell01","roi6_3x_z0_11lp_3000f_00001",232,2.5,400,167,17.4,48.6,7.27,41.9,61.0,77.9,80.1,51.4],["Sert","0829","cell02","roi5_3x_z0_12lp_3000f_00001",238,2.5,400,167,14.0,44.6,6.73,42.2,61.3,78.1,80.3,55.4],["Sert","0829","cell03","roi4_6x_z-15_13lp_3000f_00001",249,2.5,400,167,10.9,41.6,7.39,39.2,59.3,77.0,79.2,58.4],["Sert","0829","cell04","roi8_3x_z0_13lp_3000f_00001",250,2.5,400,167,12.6,45.7,7.23,39.6,59.5,77.1,79.3,54.3],["Sert","0829","cell05","roi14_3x_z0_15lp_3000f_00001",145,1.67,600,233,24.5,39.3,1.73,63.2,75.5,86.2,87.6,60.7],["Sert","0829","cell05","roi14_4.2x_z-5_15lp_3000f_00001",156,1.67,600,200,21.4,42.7,2.37,59.2,72.8,84.7,86.2,57.3],["Sert","0829","cell05","roi14_5x_z-10_13lp_3000f_00001",153,1.67,600,200,23.0,41.1,2.43,59.4,72.9,84.7,86.2,58.9],["Sert","0829","cell05","roi14_6x_z0_14.5lp_3000f_00001",151,1.67,600,200,21.7,39.1,1.84,61.8,74.6,85.7,87.1,60.9],["Sert","0829","cell05","roi7_3x_z-5_15lp_3000f_00001",247,2.5,400,167,14.6,43.8,8.5,38.1,58.5,76.5,78.8,56.2],["Sert","0829","cell05","roi7_3x_z0_13lp_3000f_00001",239,2.5,400,167,14.3,46.8,7.4,40.9,60.4,77.6,79.8,53.2],["Sert","0829","cell06","roi4_3x_z-10_13lp_3000f_00001",233,2.31,433,167,12.2,44.2,9.21,39.4,59.4,77.0,79.2,55.8],["Sert","0829","cell07","roi3_3x_z0_11lp_3000f_00001",234,2.31,433,167,9.1,44.7,11.13,36.5,57.4,75.8,78.2,55.3],["Sert","0829","cell08","roi12_8x_z0_15lp_6000f_00001",188,1.0,1000,300,26.5,41.6,1.21,72.1,81.4,89.5,90.5,58.4],["Sert","0829","cell08","roi9_3x_z0_11lp_3000f_00001",244,2.5,400,167,11.8,42.6,4.86,44.3,62.8,78.9,81.0,57.4],["Sert","0829","cell08","roi9_6x_z5_15lp_3000f_00001",244,2.5,400,167,16.1,44.5,5.38,43.7,62.4,78.7,80.8,55.5],["Sert","0829","cell09","roi12_5x_z-5_13.5lp_3000f_00001",152,1.67,600,267,22.4,48.2,2.45,59.3,72.8,84.6,86.1,51.8],["Sert","0829","cell09","roi12_8x_z-30_20lp_3000f_00001",123,1.3,767,333,20.6,45.4,1.69,65.9,77.3,87.1,88.4,54.6],["Sert","0829","cell09","roi12_8x_z-5_13.5lp_3000f_00001",137,1.5,667,300,21.9,50.0,2.27,61.6,74.3,85.5,86.9,50.0],["Sert","0829","cell10","roi15_5x_z0_13lp_6000f_00001",93,0.94,1067,300,20.4,43.2,1.09,71.4,81.0,89.3,90.3,56.8],["Sert","0829","cell10","roi15_6x_z0_13lp_3000f_00001",113,1.2,833,300,25.2,40.9,1.26,68.4,79.0,88.1,89.3,59.1],["Sert","0829","cell10","roi1_3x_z0_10.5lp_3000f_00001",219,2.31,433,167,10.6,43.7,4.51,42.0,61.2,78.0,80.2,56.3],["Sert","0829","cell10","roi2_3x_z0_11lp_3000f_00001",225,2.31,433,167,10.1,44.2,7.93,39.1,59.2,76.9,79.1,55.8],["Sert","0829","cell11","roi10_6x_z-15_19lp_3000f_00001",240,2.5,400,167,15.2,43.6,4.05,47.0,64.6,80.0,82.0,56.4],["Sst","0322","cell1","6x_-820-1070-z20_00001",80,0.98,1017,367,47.1,79.7,1.09,70.6,80.4,89.0,90.0,20.3],["Sst","0322","cell2","6x_-743-840-z30_00001",122,1.76,567,267,51.0,82.9,1.21,66.4,77.7,87.4,88.6,17.1],["Sst","0330","cell1","-1050-760-z5_5x_6000f_15lp_00001",148,0.75,1333,200,13.8,41.1,0.43,69.6,80.0,88.8,89.9,58.9],["Sst","0806","roi1","roi1_2x_z5_15lp_6000f_00001",175,1.76,567,167,10.2,47.4,4.51,46.7,64.6,80.0,82.0,52.6],["Sst","0806","roi1","roi1_3x_z0_13.5lp_3000f_00001",167,1.67,600,133,10.3,41.6,3.6,47.4,65.1,80.3,82.2,58.4],["Sst","0806","roi1","roi1_3x_z9_14lp_6000f_00001",179,1.88,533,167,9.1,47.7,4.33,47.0,64.8,80.1,82.1,52.3],["Sst","0806","roi1","roi1_5x_z10_16lp_3000f_00001",195,1.88,533,133,9.6,44.9,3.86,46.1,64.1,79.8,81.7,55.1],["Sst","0806","roi1","roi1_5x_z5_16lp_3000f_00001",197,1.88,533,133,9.4,43.7,4.2,44.8,63.2,79.2,81.3,56.3],["Sst","0806","roi1","roi1_6x_z5_13lp_3000f_00001",193,1.88,533,133,9.3,44.7,4.27,45.8,63.9,79.6,81.6,55.3],["Sst","0806","roi1","roi1_6x_z5_14lp_3000f_00001",194,1.88,533,133,9.6,44.5,4.49,44.9,63.3,79.3,81.3,55.5],["Sst","0806","roi2","roi2_3x_z5_18lp_3000f_00001",195,1.88,533,167,10.0,44.8,5.41,42.8,61.9,78.5,80.6,55.2],["Sst","0806","roi3","roi3_2x_z5_18lp_3000f_00001",140,1.36,733,200,9.6,41.6,1.01,59.0,72.9,84.7,86.2,58.4],["Sst","0806","roi4","roi4_5x_z10_16lp_3000f_00001",194,1.88,533,167,10.0,47.0,3.74,46.7,64.6,80.0,82.0,53.0],["Sst","0806","roi5","roi5_5x_z5_13lp_3000f_00001",166,1.76,567,167,15.0,44.5,2.79,52.1,68.2,82.1,83.8,55.5],["Sst","0806","roi6","roi6_4x_z5_12lp_3000f_00001",176,1.88,533,167,11.1,43.1,4.04,48.3,65.6,80.6,82.5,56.9],["Sst","0807","roi1","roi1_z20_3.1x_3000f_lp12.5_00002",195,2.0,500,100,14.5,31.1,2.25,50.7,67.3,81.5,83.4,68.9],["Sst","0807","roi1","roi1_z30_3x_3000f_lp15_00001",191,2.0,500,100,19.0,32.3,2.07,53.9,69.4,82.7,84.4,67.7],["Sst","0807","roi1","roi1_z5_2.5x_3000f_lp15_00001",193,2.0,500,100,20.6,34.4,1.9,54.1,69.6,82.9,84.5,65.6],["Sst","0807","roi1","roi1_z5_5x_6000f_lp15.5_00001",186,2.0,500,100,18.7,32.9,2.04,54.0,69.5,82.8,84.5,67.1],["Sst","0807","roi2","roi2_z30_2x_3000f_lp18_00001",197,2.0,500,100,17.3,33.3,1.81,52.5,68.5,82.3,84.0,66.7],["Sst","0807","roi3","roi3_z15_6x_3000f_lp13_00001",189,2.0,500,100,20.9,34.7,1.73,54.6,69.9,83.0,84.7,65.3],["Sst","0807","roi3","roi3_z15_6x_3000f_lp14_00001",194,2.0,500,100,18.0,33.1,1.99,52.4,68.4,82.2,84.0,66.9],["Sst","0807","roi4","roi4_z16_2.6x_6000f_lp15_00001",120,1.25,800,167,20.6,31.6,0.26,71.1,81.0,89.3,90.4,68.4],["Sst","0807","roi4","roi4_z40_3x_6000f_lp25.5_00001",147,1.5,667,133,16.2,31.4,0.4,64.3,76.4,86.8,88.1,68.6],["Sst","0807","roi5","roi5_z-5_3x_6000f_lp14_00001",151,1.67,600,133,27.0,50.9,1.55,63.6,75.8,86.3,87.7,49.1],["Sst","0807","roi5","roi5_z0_3x_6000f_lp11_00001",149,1.58,633,133,25.3,46.0,1.08,63.3,75.7,86.3,87.7,54.0],["Sst","0807","roi5","roi5_z0_4x_3000f_lp11_00001",131,1.58,633,100,49.6,79.1,1.96,66.0,77.2,87.1,88.4,20.9],["Vgat","0323","cell1","730-930-z25_9x_3000f_00001",37,0.39,2567,267,7.4,44.2,0.4,74.5,83.2,90.6,91.5,55.8],["Vgat","0323","cell2","760-750-z30_6x_3000f_00001",38,0.4,2500,267,12.7,37.1,0.42,74.3,83.1,90.5,91.4,62.9],["Vgat","0323","cell3","-500-990-z-30_8x_3000f_00001",39,0.41,2467,233,13.0,34.2,0.42,73.5,82.6,90.2,91.2,65.8],["Vgat","0730","cell1","roi1_1.4x_x1100y1050_z6_5000f_13lp_00001",43,0.38,2667,310,5.5,20.4,0.18,78.5,85.8,92.0,92.8,79.6],["Vgat","0730","cell1","roi1_1.6x_x1050y1000_z100_3000f_17.5lp_00001",56,0.44,2283,300,43.7,44.1,0.15,79.7,86.6,92.5,93.2,55.9],["Vgat","0730","cell1","roi1_2x_x1100y950_z13_6000f_13lp_00001",46,0.37,2716,318,4.3,19.1,0.18,79.0,86.1,92.1,92.9,80.9],["Vgat","0730","cell1","roi1_3.2x_x1100y1050_z6_6000f_12lp_00001",74,0.38,2634,333,4.5,20.8,0.18,78.7,86.0,92.1,92.9,79.2],["Vgat","0730","cell1","roi1_3x_x1100y950_z8_6000f_13lp_00001",40,0.42,2384,333,14.0,37.8,0.16,78.7,86.0,92.1,92.9,62.2],["Vgat","0730","cell2","roi1_2.4x_x1300y900_z250_3000f_30lp_00001",46,0.46,2151,300,4.7,21.3,0.21,78.3,85.7,92.0,92.7,78.7],["Vgat","0730","cell2","roi1_3x_x1350y850_z265_3000f_31lp_00001",65,0.67,1500,233,19.3,46.2,0.31,72.1,81.6,89.7,90.7,53.8],["Vgat","0730","cell3","roi1_3x_x950y1200_z40_6000f_14lp_00001",39,0.4,2500,333,4.0,19.4,0.12,80.0,86.8,92.6,93.3,80.6],["Vgat","0730","cell3","roi1_3x_x950y1200_z40_6000f_14lp_00002",75,0.38,2600,300,4.5,19.5,0.18,79.8,86.7,92.5,93.3,80.5],["Vgat","0730","deep","roi1_2.4x_x1000y1000_z320_3000f_32lp_00001",31,0.54,1867,267,25.3,35.1,0.28,79.4,86.4,92.4,93.1,64.9],["Vgat","0730","deep","roi1_2.4x_x1300y900_z250_3000f_30lp_00001",46,0.46,2151,300,4.7,21.3,0.21,78.3,85.7,92.0,92.7,78.7],["Vgat","0730","deep","roi1_3x_x1350y850_z265_3000f_31lp_00001",65,0.67,1500,233,19.3,46.2,0.31,72.1,81.6,89.7,90.7,53.8],["Vgat","0730","quiet","roi1_1.2x_x1100y1050_z0_5000f_14lp_00001",44,0.38,2631,286,4.8,18.9,0.18,78.2,85.6,91.9,92.7,81.1],["Vgat","0730","quiet","roi1_1.5x_x1050y1000_z100_3000f_26.5lp_00001",27,0.45,2234,298,8.1,20.6,0.15,79.1,86.1,92.2,92.9,79.4],["Vgat","0730","quiet","roi1_2.4x_x1000y1000_z320_3000f_32lp_00001",31,0.54,1867,267,25.3,35.1,0.28,79.4,86.4,92.4,93.1,64.9],["Vgat","0730","quiet","roi1_2.4x_x950y1000_z85_6000f_14.5lp_00001",80,0.41,2467,300,4.5,23.8,0.13,79.1,86.3,92.3,93.1,76.2],["Vgat","0730","quiet","roi1_3x_x1050y1000_z100_3000f_17lp_00001",48,0.49,2050,300,5.6,27.7,0.3,78.1,85.5,91.9,92.7,72.3],["Vgat","0730","quiet","roi1_3x_x1100y950_z8_3000f_11.5lp_00001",37,0.4,2500,300,13.1,24.6,0.2,82.1,88.2,93.4,94.0,75.4],["Vgat","0730","quiet","roi1_3x_x950y1000_z70_6000f_15lp_00001",76,0.39,2567,300,4.1,18.0,0.15,79.5,86.5,92.4,93.2,82.0],["Vglut2","0224","pFN","left_pFN_roi1_z0_12x_00001",227,2.31,433,133,8.0,35.6,3.84,44.6,63.2,79.2,81.3,64.4],["Vglut2","0224","pFN","pFN_roi1_z0_512x512_6x_2000f_00001",137,2.14,467,167,9.8,45.4,2.83,46.4,64.3,79.9,81.9,54.6],["Vglut2","0224","pFN","pFN_roi2_z5_25x_512x512_3x_6000f_00001",133,2.14,467,167,11.2,49.0,3.63,44.5,63.1,79.1,81.2,51.0],["Vglut2","0224","pFN","pFN_roi2_z5_512x512_6x_6000f_00001",138,2.14,467,200,9.8,45.4,2.63,46.8,64.6,80.1,82.0,54.6],["Vglut2","0224","pFN","pFN_roi3_z20_512x512_3x_2000f_00001",139,2.14,467,167,10.6,40.9,2.68,46.0,64.1,79.8,81.7,59.1],["Vglut2","0224","pFN","pFN_roi4_z0_512x512_5x_6000f_00001",410,2.14,467,200,9.1,43.6,2.68,47.1,64.9,80.2,82.1,56.4],["Vglut2","0728","cell1","fov1_5x_y1900x1320_z60_6000f_17lp_00001",74,1.5,667,167,14.1,45.6,8.56,38.2,58.2,76.2,78.6,54.4],["Vglut2","0728","cell2","roi2_4x_y2000x1400_z-15_6000f_17.5lp_00001",81,1.58,633,133,15.9,48.4,6.49,41.3,60.5,77.6,79.7,51.6],["Vglut2","0728","cell2","roi2_4x_y2000x1400_z-20_6000f_21lp_00001",83,1.67,600,167,16.9,45.0,6.62,41.2,60.3,77.4,79.6,55.0],["Vglut2","0728","quiet","fov1_1.7x_y1650x1320_z30_3000f_15lp_00001",56,0.72,1395,289,12.4,35.5,1.97,64.2,75.7,86.1,87.5,64.5],["Vglut2","0728","quiet","fov1_1.7x_y1650x1320_z35_3000f_15lp_00001",57,0.73,1368,263,13.8,31.8,1.83,64.4,75.9,86.2,87.6,68.2],["Vglut2","0728","quiet","fov1_1.7x_y1650x1320_z40_3000f_17lp_00001",56,0.73,1368,263,11.3,32.3,1.83,64.5,76.0,86.3,87.6,67.7],["Vglut2","0728","quiet","fov1_2.1x_y1350x1310_z30_3000f_13lp_00001",74,0.73,1367,267,12.6,35.9,1.78,64.8,76.4,86.6,87.9,64.1],["Vglut2","0728","quiet","fov1_2x_y1700x1350_z0_6000f_15.5lp_00001",141,0.71,1400,300,10.8,38.6,1.81,64.4,76.1,86.5,87.8,61.4],["Vglut2","0728","quiet","fov1_2x_y1700x1350_z15_6000f_16lp_00001",115,0.73,1368,263,12.7,35.9,1.95,63.7,75.4,86.0,87.3,64.1],["Vglut2","0728","quiet","fov1_2x_y1700x1350_z15_6000f_17.5lp_00001",148,0.73,1367,267,12.5,34.4,1.8,65.2,76.7,86.8,88.1,65.6],["Vglut2","0728","quiet","fov1_2x_y1700x1350_z25_3000f_16lp_00001",57,0.72,1395,289,13.3,38.8,2.11,63.0,74.9,85.6,87.0,61.2],["Vglut2","0728","quiet","fov1_2x_y1700x1350_z5_6000f_15.5lp_00001",142,0.71,1400,300,12.0,33.1,1.8,65.1,76.6,86.7,88.0,66.9],["Vglut2","0728","quiet","fov1_2x_y1700x1350_z5_6000f_15.5lp_00002",144,0.72,1383,267,10.7,32.8,1.88,64.9,76.4,86.6,87.9,67.2],["Vglut2","0728","quiet","roi2_1.6x_y1400x1600_z5_3000f_16lp_00001",49,0.7,1432,250,15.6,35.8,1.65,67.0,77.4,87.1,88.3,64.2],["Vglut2","0728","quiet","roi2_2.5x_y1100x1700_z-25_3000f_17lp_00001",77,0.75,1333,267,16.0,38.5,1.63,67.2,78.0,87.5,88.8,61.5],["Vglut2","0728","quiet","roi2_2x_y1400x1550_z0_3000f_15lp_00001",51,0.72,1381,262,11.8,32.3,1.78,66.8,77.3,87.0,88.2,67.7],["Vglut2","0810","cell1","roi1_3x_12.5lp_3000f_z3_00001",106,1.11,900,100,16.4,39.9,6.25,41.0,60.4,77.6,79.8,60.1],["Vglut2","0810","cell1","roi1_3x_13lp_3000f_z7_00001",91,0.91,1100,100,9.1,35.6,5.82,39.7,59.6,77.1,79.3,64.4],["Vglut2","0810","cell1","roi1_5.6x_13lp_3000f_z12_00001",106,1.07,933,100,9.1,35.6,8.37,35.6,56.7,75.4,77.8,64.4],["Vglut2","0810","cell1","roi1_5x_13lp_3000f_z12_00001",98,1.0,1000,100,8.0,35.5,8.1,34.1,55.5,74.7,77.2,64.5],["Vglut2","0810","cell1","roi1_5x_13lp_6000f_z5_00002",91,0.94,1067,100,7.7,35.6,6.05,39.1,59.1,76.8,79.1,64.4],["Vglut2","0810","cell2","roi1_5x_z-36_24lp_3000f_00001",67,0.68,1467,167,4.7,31.4,1.47,63.5,75.7,86.3,87.6,68.6],["Vglut2","0810","cell2","roi1_7x_z-30_21lp_3000f_00001",102,1.03,967,133,8.6,36.9,2.77,50.9,67.2,81.5,83.3,63.1],["Vglut2","0810","cell3","roi1_5x_z-51_26lp_3000f_00001",62,0.64,1567,133,8.0,30.1,1.71,60.0,73.3,84.9,86.4,69.9],["Vglut2","0810","cell4","roi1_z-25_19lp_3000f_00001",131,1.3,767,117,8.2,41.8,6.13,41.9,61.1,78.0,80.1,58.2],["Vglut2","0824","cell1","roi1_z-10_10x_3000f_16lp_00001",76,0.81,1233,167,23.0,65.8,2.58,58.2,72.2,84.3,85.9,34.2],["Vglut2","0824","cell1","roi1_z-13_8x_3000f_19lp_00001",73,0.67,1500,200,23.2,63.0,2.37,57.7,71.8,84.1,85.6,37.0],["Vglut2","0824","cell1","roi1_z-20_3000f_19lp_00001",74,0.76,1316,206,20.4,65.2,2.5,56.0,70.6,83.4,85.0,34.8],["Vglut2","0824","cell1","roi1_z0_8x_3000f_12lp_00001",72,0.69,1450,202,21.7,66.6,1.66,58.5,72.4,84.4,85.9,33.4],["Vglut2","0824","cell1","roi1_z3_6x_3000f_11lp_00001",71,0.65,1533,205,23.9,61.8,1.73,58.1,72.1,84.2,85.8,38.2],["Vglut2","0824","cell1","roi1_z7_8x_3000f_11lp_00001",74,0.83,1200,149,23.1,68.5,1.44,60.1,73.4,85.0,86.5,31.5],["Vglut2","0824","cell2","roi1_z-10_3x_3000f_16lp_00001",73,0.67,1500,217,33.0,68.9,1.22,61.7,74.6,85.7,87.1,31.1],["Vglut2","0824","cell2","roi1_z-11_6x_3000f_14lp_00001",75,0.79,1267,167,24.9,71.3,1.96,58.2,72.2,84.3,85.9,28.7],["Vglut2","0824","cell2","roi1_z-11_8x_3000f_14lp_00001",77,0.79,1267,167,24.3,69.6,2.64,55.3,70.3,83.2,84.9,30.4],["Vglut2","0824","cell2","roi1_z-12_3x_3000f_14lp_00001",75,0.83,1200,200,31.7,65.4,1.14,62.6,75.2,86.0,87.4,34.6],["Vglut2","0824","cell2","roi1_z-16_3x_3000f_16lp_00001",69,0.64,1566,271,24.0,52.0,1.2,66.9,77.9,87.5,88.8,48.0],["Vglut2","0824","cell2","roi1_z-16_7x_3000f_19lp_00001",89,1.03,966,161,28.9,70.2,1.19,63.9,76.0,86.4,87.8,29.8],["Vglut2","0824","cell2","roi1_z-18_3x_3000f_15lp_00001",63,0.57,1766,260,27.5,55.7,1.08,66.0,77.4,87.2,88.5,44.3],["Vglut2","0824","cell2","roi1_z-5_3x_3000f_13lp_00001",106,1.2,833,215,27.4,58.2,1.41,67.9,78.6,87.9,89.1,41.8],["Vglut2","0824","cell2","roi1_z-6_8x_3000f_13lp_00001",78,0.83,1200,187,25.7,66.8,1.36,60.7,73.8,85.2,86.7,33.2],["Vglut2","0824","cell3","roi1_z-1_5x_3000f_14lp_00001",83,0.97,1033,187,27.5,67.8,1.35,63.9,75.9,86.4,87.7,32.2],["Vglut2","0824","cell3","roi1_z5_6x_3000f_21lp_00001",86,1.03,966,186,28.2,65.3,1.46,64.1,76.0,86.4,87.8,34.7],["Vglut2","0824","cell4","roi2_z-25_6x_3000f_14lp_00001",77,0.91,1100,200,25.1,64.5,1.24,62.8,75.3,86.1,87.5,35.5],["Vglut2","1124","IO","roi3_-1000-300-40_32lp_930_x1.4_256x512_3000f_00001",43,0.45,2233,300,8.7,32.0,0.34,73.8,82.8,90.3,91.3,68.0],["Vglut2","1124","IO","roi3_-1000-300-60_38lp_930_x1.4_256x512_3000f_00001",45,0.46,2167,300,8.0,37.8,0.4,74.1,83.0,90.4,91.4,62.2],["Vglut2","1124","IO","roi3_-650-380-30_26lp_930_x1.2_256x512_3000f_00001",58,0.59,1700,367,9.7,51.9,0.3,72.9,82.2,90.0,91.0,48.1],["Vglut2","1124","IO","roi4_180-500-40_42lp_930_x1.7_256x512_3000f_00001",43,0.44,2267,267,12.2,38.9,0.36,74.0,82.9,90.4,91.4,61.1],["Vglut2","1124","pFN","roi5_1400-1230-0_x4.4_15lp_6000f_00001",70,0.35,2833,300,7.5,32.4,0.28,75.8,84.1,91.1,92.0,67.6],["Vglut2","1124","pFN","roi5_1400-1300-0_18lp_930_x4_512x512_6000f_00002",67,0.38,2600,300,37.6,46.5,0.36,74.5,83.2,90.6,91.5,53.5]];
+const LADDER = [
+  {n:"now",       c:"512x256, 58.3 Hz",                 d:25.0, k:11, now:1},
+  {n:"+ gx fix",  c:"extrapolate the disturbance",      d:16.3, k:12},
+  {n:"+ 128 lines", c:"110 Hz \u2014 2:1 pixels or half the field", d:9.1, k:13},
+  {n:"+ min flyback", c:"122 Hz \u2014 126 \u00b5s, one resonant cycle", d:8.2, k:14}
+];
+const COLS = [
+ {k:0,t:"Genotype",tag:1},{k:1,t:"Session"},{k:2,t:"Site",txt:1},{k:3,t:"Recording",rec:1},
+ {k:4,t:"Cycles"},{k:5,t:"Rate Hz",dp:2},{k:6,t:"Period ms"},{k:7,t:"Rise ms"},
+ {k:8,t:"Period CV %",dp:1},{k:9,t:"Wave var %",dp:1},{k:10,t:"Pwr >6.8Hz %",dp:2},
+ {k:11,t:"Removed now %",bar:1,grp:1},{k:12,t:"+ gx fix %",bar:1,grp:1},
+ {k:13,t:"+ 128 ln 110Hz %",bar:1,grp:1},{k:14,t:"+ 122Hz %",bar:1,grp:1},
+ {k:15,t:"Predictor ceiling %",dp:1}];
+let sortK = 0, sortDir = 1;
+const active = new Set();
+
+const med = a => { const s = a.filter(Number.isFinite).sort((x,y)=>x-y);
+                   return s.length ? s[Math.floor(s.length/2)] : NaN; };
+const band = v => v > 80 ? "v-good" : v >= 60 ? "v-mid" : "v-poor";
+
+document.getElementById("rungs").innerHTML = LADDER.map(L => {
+  const v = med(ROWS.map(r=>r[L.k]));
+  return '<div class="rung' + (L.now ? ' is-now' : '') + '">' +
+    '<div class="what"><span class="name">' + L.n + '</span><span class="cost">' + L.c + '</span></div>' +
+    '<div class="dly">' + L.d.toFixed(1) + ' ms</div>' +
+    '<div class="trk"><div class="fil" style="width:' + v.toFixed(1) + '%"></div></div>' +
+    '<div class="pct">' + Math.round(v) + '%</div></div>';
+}).join("");
+
+const genos = [...new Set(ROWS.map(r=>r[0]))].sort();
+document.getElementById("tiles").innerHTML = genos.map(g => {
+  const R = ROWS.filter(r=>r[0]===g);
+  const f = (i,d) => med(R.map(r=>r[i])).toFixed(d);
+  return '<div class="tile"><div class="g"><span class="gn">' + g + '</span>' +
+   '<span class="gc">n=' + R.length + '</span></div><dl>' +
+   '<dt>rate</dt><dd>' + f(5,2) + ' Hz</dd>' +
+   '<dt>rise</dt><dd>' + Math.round(med(R.map(r=>r[7]))) + ' ms</dd>' +
+   '<dt>period CV</dt><dd>' + f(8,1) + '%</dd>' +
+   '<dt>removed now</dt><dd>' + Math.round(med(R.map(r=>r[11]))) + '%</dd>' +
+   '<dt>at 110 Hz</dt><dd class="hi">' + Math.round(med(R.map(r=>r[13]))) + '%</dd></dl></div>';
+}).join("");
+
+document.getElementById("filters").innerHTML =
+  '<button class="chip" data-g="*" aria-pressed="true">all</button>' +
+  genos.map(g => '<button class="chip" data-g="' + g + '" aria-pressed="false">' + g + '</button>').join("");
+document.getElementById("filters").addEventListener("click", e => {
+  const b = e.target.closest("button"); if (!b) return;
+  const g = b.dataset.g;
+  if (g === "*") active.clear();
+  else active.has(g) ? active.delete(g) : active.add(g);
+  document.querySelectorAll("#filters button").forEach(x =>
+    x.setAttribute("aria-pressed", x.dataset.g === "*" ? (active.size === 0) : active.has(x.dataset.g)));
+  draw();
+});
+
+document.getElementById("hrow").innerHTML = COLS.map((c,i) =>
+  '<th data-i="' + i + '"' + (c.grp ? ' class="grp"' : '') +
+  '><button>' + c.t + '<span class="ar"></span></button></th>').join("");
+document.getElementById("hrow").addEventListener("click", e => {
+  const th = e.target.closest("th"); if (!th) return;
+  const i = +th.dataset.i;
+  if (i === sortK) sortDir = -sortDir; else { sortK = i; sortDir = (i < 4) ? 1 : -1; }
+  draw();
+});
+
+function draw(){
+  const rows = ROWS.filter(r => active.size === 0 || active.has(r[0]));
+  const k = COLS[sortK].k;
+  rows.sort((a,b) => {
+    const x = a[k], y = b[k];
+    if (typeof x === "string") return sortDir * x.localeCompare(y);
+    return sortDir * ((x == null ? -1e9 : x) - (y == null ? -1e9 : y));
+  });
+  document.querySelectorAll("#hrow th").forEach((th,i) => {
+    th.removeAttribute("aria-sort");
+    th.querySelector(".ar").textContent = (i === sortK) ? (sortDir > 0 ? " \u25b2" : " \u25bc") : "";
+    if (i === sortK) th.setAttribute("aria-sort", sortDir > 0 ? "ascending" : "descending");
+  });
+  document.getElementById("tbody").innerHTML = rows.map(r => "<tr>" + COLS.map(c => {
+    const v = r[c.k];
+    if (c.tag) return '<td class="t"><span class="gtag">' + v + '</span></td>';
+    if (c.rec) return '<td class="rec" title="' + v + '">' + v + '</td>';
+    if (c.txt) return '<td class="t">' + v + '</td>';
+    if (v == null) return '<td>&mdash;</td>';
+    if (c.bar) return '<td><span class="bar ' + band(v) + '"><span class="track">' +
+      '<span class="fill" style="width:' + Math.max(0,Math.min(100,v)) + '%"></span></span>' +
+      '<span class="n">' + v.toFixed(1) + '</span></span></td>';
+    return '<td>' + (c.dp ? v.toFixed(c.dp) : v) + '</td>';
+  }).join("") + "</tr>").join("");
+}
+draw();
+</script>
