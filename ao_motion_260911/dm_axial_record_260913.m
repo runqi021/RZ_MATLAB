@@ -55,7 +55,17 @@ SI_DIR       = 'C:\Users\dklab\Desktop\SI2018bR1_2018-12-19_4a9264c4fc';
 Z2C_FILE     = fullfile(SI_DIR,'BAX331-Z2C.mat');
 BASELINE_VAR = 'DMcommand_sys_aber_cor_930';   % load your system correction FIRST
 ROW_DEFOC    = 3;         % verified from actuator geometry: row 3 is defocus
-CHANNEL      = 3;         % STRUCTURAL channel -- see note 3 above
+% *** TWO DIFFERENT CHANNEL SETTINGS. THEY ARE NOT THE SAME THING. ***
+% SAVE_CHANNELS is your science data: whatever you want recorded, any
+% combination. REG_CHANNEL is the single channel the loop registers on, and it
+% must be STRUCTURAL. On a functional channel breath-locked ACTIVITY is
+% indistinguishable from breath-locked MOTION -- 15% of cells firing puts
+% 0.22 um into dz, 40% puts in 0.38, and the robust refit is WORSE at that
+% point because a transient covers a whole cell rather than a few outlier
+% pixels. Registering on GCaMP would feed the loop the very signal you are
+% imaging.
+SAVE_CHANNELS = [1 3];    % logged to the TIFF. Any combination of 1 2 3.
+REG_CHANNEL   = 3;        % the loop registers on this one. Structural.
 
 % ---- reference ----------------------------------------------------------
 REF_REUSE_FROM = '';      % a previous session dir, or '' to take a fresh one
@@ -72,7 +82,15 @@ REUSE_Z_TOL_UM = 1.0;     % refuse a reused reference if the stage z has moved
 REF_MIN_UM   = -12;
 REF_MAX_UM   =  12;
 REF_STEP_UM  =  1;
-REF_FRAMES   =  8;        % frames averaged per reference plane
+% *** AVERAGE WHOLE BREATH CYCLES PER PLANE, NOT A FIXED FRAME COUNT. ***
+% A reference plane is only the plane you think it is if the motion averaged out
+% while it was taken. A short grab is a SNAPSHOT AT A RANDOM BREATH PHASE, with
+% the brain displaced by up to the full motion amplitude -- and a reference built
+% from 25 differently-displaced planes is wrong in a way nothing downstream can
+% detect. Median breath period on the ventral archive is 1067 ms, so 3.3 s is
+% about 3 cycles. dm_loop_validate uses 2.0 s and says so explicitly: that is a
+% STATIC-sample number, purely about SNR, and it does not transfer to an animal.
+REF_SEC_PER_PLANE = 3.3;  % >= 3 breath cycles. 2.0 is enough on a static prep.
 
 % ---- control law --------------------------------------------------------
 LOOP_GAIN    = 0.7;       % fraction of the estimate applied per update
@@ -108,19 +126,35 @@ siState = snapshot_si(hSI);
 p0      = hSI.hMotors.motorPosition;
 restore = onCleanup(@() restore_all(hDM, baseline, hSI, siState, p0)); %#ok<NASGU>
 
+% APPLY THE CHANNEL SELECTION, AND MAKE SURE THE LOOP CAN SEE ITS CHANNEL.
+% channelSave and channelDisplay are independent: the loop reads frames from the
+% DISPLAY, so a registration channel that is saved but not displayed is invisible
+% to it and every estimate comes back empty.
+avail = 1:hSI.hChannels.channelsAvailable;
+bad = setdiff(SAVE_CHANNELS, avail);
+assert(isempty(bad), 'dm_rec:chan', 'channel(s) %s do not exist; this rig has %d', ...
+       mat2str(bad), hSI.hChannels.channelsAvailable);
+assert(ismember(REG_CHANNEL, avail), 'dm_rec:regChan', ...
+       'REG_CHANNEL %d does not exist', REG_CHANNEL);
+hSI.hChannels.channelSave = SAVE_CHANNELS;
+if ~ismember(REG_CHANNEL, hSI.hChannels.channelDisplay)
+    hSI.hChannels.channelDisplay = union(hSI.hChannels.channelDisplay, REG_CHANNEL);
+    fprintf('   [note] added ch%d to channelDisplay so the loop can read it\n', REG_CHANNEL);
+end
+
 rate  = hSI.hRoiManager.scanFrameRate;
 nFr   = round(DURATION_S * rate);
 fprintf('\n=============== AO-CORRECTED RECORDING ===============\n');
 fprintf('geometry   %d x %d px, %.1f Hz -> loop delay %.1f ms at 1.46 frames\n', ...
         hSI.hRoiManager.pixelsPerLine, hSI.hRoiManager.linesPerFrame, rate, 1460/rate);
 fprintf('duration   %.0f s = %d frames\n', DURATION_S, nFr);
-fprintf('channel    %d   | loop gain %.2f | lead %.2f frames | step limit %.1f um\n', ...
-        CHANNEL, LOOP_GAIN, EXTRAP_GAIN, MAX_STEP_UM);
+fprintf('register   ch%d | loop gain %.2f | lead %.2f frames | step limit %.1f um\n', ...
+        REG_CHANNEL, LOOP_GAIN, EXTRAP_GAIN, MAX_STEP_UM);
 fprintf('baseline   %s, max|cmd| %.3f (leaves %.3f of the +-1 stroke)\n', ...
         BASELINE_VAR, max(abs(baseline)), CMD_LIMIT-max(abs(baseline)));
 bytes = nFr * hSI.hRoiManager.pixelsPerLine * hSI.hRoiManager.linesPerFrame * 2 * ...
-        numel(hSI.hChannels.channelSave);
-fprintf('disk       ~%.1f GB for %d saved channel(s)\n', bytes/1e9, numel(hSI.hChannels.channelSave));
+        numel(SAVE_CHANNELS);
+fprintf('save       ch%s -> ~%.1f GB\n', mat2str(SAVE_CHANNELS), bytes/1e9);
 if DRY_RUN, fprintf('\n*** DRY RUN: no correction sent, nothing logged ***\n'); end
 
 %% ================= 1. FOV CHECK: does z carry information? =================
@@ -129,8 +163,8 @@ if DRY_RUN, fprintf('\n*** DRY RUN: no correction sent, nothing logged ***\n'); 
 fprintf('\n--- 1. can this field be registered in z? ---\n');
 arm_scanner(hSI, RES_ARM_SEC);
 hSI.hChannels.loggingEnable = false;
-Ia = grab_at_defocus(hSI, hDM, baseline, Z2C, ROW_DEFOC,  0, 4, CHANNEL, CMD_LIMIT);
-Ib = grab_at_defocus(hSI, hDM, baseline, Z2C, ROW_DEFOC,  5, 4, CHANNEL, CMD_LIMIT);
+Ia = grab_at_defocus(hSI, hDM, baseline, Z2C, ROW_DEFOC,  0, 4, REG_CHANNEL, CMD_LIMIT);
+Ib = grab_at_defocus(hSI, hDM, baseline, Z2C, ROW_DEFOC,  5, 4, REG_CHANNEL, CMD_LIMIT);
 hDM.senddata(baseline); pause(0.2);
 r = corr_lin(Ia, Ib);
 fprintf('   correlation between planes 5 um apart: %.4f\n', r);
@@ -151,11 +185,23 @@ end
 % different park -- otherwise the zero shifts silently and dz is meaningless.
 if isempty(REF_REUSE_FROM)
     fprintf('\n--- 2. reference stack, stage parked, DM stepping ---\n');
-    zRef = REF_MIN_UM:REF_STEP_UM:REF_MAX_UM;
+    zRef   = REF_MIN_UM:REF_STEP_UM:REF_MAX_UM;
+    nRefFr = max(1, round(REF_SEC_PER_PLANE * rate));
+    fprintf('   %d planes x %.1f s (%d frames) = %.0f s of acquisition\n', ...
+            numel(zRef), REF_SEC_PER_PLANE, nRefFr, numel(zRef)*REF_SEC_PER_PLANE);
+    fprintf('   each plane averages %.1f breath cycles at a 1.07 s period\n', ...
+            REF_SEC_PER_PLANE/1.067);
+    if REF_SEC_PER_PLANE < 2.0
+        warning('dm_rec:refTooShort', ...
+          ['%.2f s per plane is under two breath cycles. Each reference plane ' ...
+           'will be a snapshot at a random breath phase, displaced by up to the ' ...
+           'full motion amplitude. Raise REF_SEC_PER_PLANE unless the prep is static.'], ...
+           REF_SEC_PER_PLANE);
+    end
     refVol = []; okRef = true(size(zRef));
     for k = 1:numel(zRef)
         [I, sent] = grab_at_defocus(hSI, hDM, baseline, Z2C, ROW_DEFOC, zRef(k), ...
-                                    REF_FRAMES, CHANNEL, CMD_LIMIT);
+                                    nRefFr, REG_CHANNEL, CMD_LIMIT);
         if ~sent
             fprintf('   z %+5.1f um SKIPPED -- would breach the ALPAO limit\n', zRef(k));
             okRef(k) = false; continue
@@ -228,7 +274,7 @@ end
 while ~strcmpi(hSI.acqState,'idle')
     try, fno = hSI.hDisplay.lastFrameNumber; catch, pause(0.002); continue; end
     if fno == lastNo, pause(0.001); drawnow limitrate; continue; end
-    [I, ~] = get_disp_frame(hSI, CHANNEL);
+    [I, ~] = get_disp_frame(hSI, REG_CHANNEL);
     if isempty(I)
         nEmpty = nEmpty + 1;
         if nEmpty > 2000, hSI.abort(); error('dm_rec:noFrames','display gave no frames'); end
@@ -294,7 +340,7 @@ if L.nMissed > 0.02*n
 end
 R = struct('log',L,'zRef',zRef,'refZPark',refZPark,'refGeom',refGeom, ...
            'baselineVar',BASELINE_VAR,'loopGain',LOOP_GAIN,'extrapGain',EXTRAP_GAIN, ...
-           'channel',CHANNEL,'rate',rate,'nFrames',nFr,'stem',FILE_STEM,'dryRun',DRY_RUN);
+           'saveChannels',SAVE_CHANNELS,'regChannel',REG_CHANNEL,'rate',rate,'nFrames',nFr,'stem',FILE_STEM,'dryRun',DRY_RUN);
 if ~DRY_RUN
     out = fullfile(sessDir, [FILE_STEM '_aoloop.mat']);
     save(out,'-struct','R');
@@ -375,6 +421,8 @@ function s = snapshot_si(hSI)
 s.numSlices      = hSI.hStackManager.numSlices;
 s.framesPerSlice = hSI.hStackManager.framesPerSlice;
 s.logging        = hSI.hChannels.loggingEnable;
+s.chanSave       = hSI.hChannels.channelSave;
+s.chanDisplay    = hSI.hChannels.channelDisplay;
 s.logFilePath    = hSI.hScan2D.logFilePath;
 s.logFileStem    = hSI.hScan2D.logFileStem;
 s.logFileCounter = hSI.hScan2D.logFileCounter;
@@ -388,6 +436,8 @@ try
     hSI.hStackManager.numSlices      = s.numSlices;
     hSI.hStackManager.framesPerSlice = s.framesPerSlice;
     hSI.hChannels.loggingEnable      = s.logging;
+    hSI.hChannels.channelSave        = s.chanSave;
+    hSI.hChannels.channelDisplay     = s.chanDisplay;
     hSI.hScan2D.logFilePath          = s.logFilePath;
     hSI.hScan2D.logFileStem          = s.logFileStem;
     hSI.hScan2D.logFileCounter       = s.logFileCounter;
